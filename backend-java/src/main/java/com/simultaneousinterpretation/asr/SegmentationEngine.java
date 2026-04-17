@@ -248,11 +248,14 @@ public class SegmentationEngine {
   private List<Segment> tryEmit(String language, double confidence, int floor) {
     List<Segment> result = new ArrayList<>();
     int effMax = effectiveMaxChars(language);
+    // 方案A：增加缓冲量，只有超过 effMax + 缓冲 才强制切分
+    int hardSplitThreshold = effMax + softBreakChars;
 
     while (!buffer.isEmpty()) {
       String current = buffer.toString();
 
-      if (current.length() >= effMax) {
+      // 只有当缓冲区超过 hardSplitThreshold 时才强制切分
+      if (current.length() >= hardSplitThreshold) {
         int splitAt = findBestSplit(current, effMax);
         if (splitAt > 0 && splitAt < current.length()) {
           result.add(emit(current.substring(0, splitAt).trim(), language, confidence, floor));
@@ -280,10 +283,11 @@ public class SegmentationEngine {
     if (buffer.isEmpty()) return List.of();
     List<Segment> result = new ArrayList<>();
     int effMax = effectiveMaxChars(language);
+    int hardSplitThreshold = effMax + softBreakChars;
 
     while (!buffer.isEmpty()) {
       String current = buffer.toString();
-      if (current.length() > effMax) {
+      if (current.length() >= hardSplitThreshold) {
         int splitAt = findBestSplit(current, effMax);
         if (splitAt > 0 && splitAt < current.length()) {
           result.add(emit(current.substring(0, splitAt).trim(), language, confidence, floor));
@@ -301,65 +305,92 @@ public class SegmentationEngine {
   }
 
   /**
-   * Find the best position to split text. Priority:
-   * 1. Sentence-ending punctuation (. ? !) between softBreakChars and maxChars
-   * 2. Semantic break keywords (but, however, therefore, etc.) - ensures semantic completeness
-   * 3. Soft break (comma, semicolon, space) in that range
-   * 4. Force split at maxChars
+   * 切分优先级（从高到低）：
+   * 1. 句末标点 - 最优先，确保句子完整
+   * 2. 语义关键词 - 确保语义连贯（如"但是"、"however"）
+   * 3. 软标点 - 逗号/分号等自然断点
+   * 4. 单词边界 - 空格处切分，避免截断单词
+   * 5. 强制在 effMax 处切分 - 最后兜底
+   *
+   * <p>搜索策略：从 effMax 向前回溯，找到最近的自然断点，
+   * 保证切分后的内容长度尽量接近但不超过 effMax。
    */
   private int findBestSplit(String text, int effMax) {
-    int limit = Math.min(text.length(), effMax + 5);
+    int textLen = text.length();
+    // 向前回溯的最大范围：最多回退 softBreakChars 个字符
+    int searchStart = Math.min(textLen - 1, effMax);
+    int searchEnd = Math.max(0, searchStart - softBreakChars);
 
-    // 1. 优先在句末标点处切分
-    int lastPunct = -1;
-    for (int i = softBreakChars; i < limit; i++) {
-      if (PUNCT_SPLIT.matcher(String.valueOf(text.charAt(i))).matches()) {
-        lastPunct = i + 1;
+    // 1. 从 effMax 向前搜索，找到最近的句末标点
+    for (int i = searchStart; i >= searchEnd; i--) {
+      if (i < textLen && PUNCT_SPLIT.matcher(String.valueOf(text.charAt(i))).matches()) {
+        return i + 1;  // 在标点后切分
       }
     }
-    if (lastPunct > 0) return lastPunct;
 
-    // 2. 在语义切分关键词后切分（确保语义完整）
-    int lastSemantic = findLastSemanticBreak(text, softBreakChars, limit);
-    if (lastSemantic > 0) return lastSemantic;
+    // 2. 从 effMax 向前搜索，找到最近的语义关键词
+    int semanticBreak = findLastSemanticBreakBackward(text, effMax, searchEnd);
+    if (semanticBreak > 0) return semanticBreak;
 
-    // 3. 在软标点处切分
-    int lastSoft = -1;
-    for (int i = softBreakChars; i < limit; i++) {
-      char c = text.charAt(i);
-      if (c == ',' || c == '，' || c == ';' || c == '；' || c == '、' || c == ':' || c == '：' || c == ' ') {
-        lastSoft = i + 1;
+    // 3. 从 effMax 向前搜索，找到最近的软标点（逗号、分号、冒号等）
+    for (int i = searchStart; i >= searchEnd; i--) {
+      if (i < textLen) {
+        char c = text.charAt(i);
+        if (c == ',' || c == '，' || c == ';' || c == '；' || c == '、' || c == ':' || c == '：') {
+          return i + 1;
+        }
       }
     }
-    if (lastSoft > 0) return lastSoft;
 
-    // 4. 搜索更早的软标点
-    for (int i = softBreakChars - 1; i > 0; i--) {
-      char c = text.charAt(i);
-      if (c == ' ' || c == ',' || c == '，') return i + 1;
+    // 4. 从 effMax 向前搜索，找到最近的空格（单词边界）
+    for (int i = searchStart; i >= searchEnd; i--) {
+      if (i < textLen && text.charAt(i) == ' ') {
+        return i + 1;
+      }
     }
 
+    // 5. 搜索更早的空格作为兜底
+    for (int i = Math.min(searchEnd - 1, textLen - 1); i >= 0; i--) {
+      if (i < textLen && text.charAt(i) == ' ') {
+        return i + 1;
+      }
+    }
+
+    // 6. 最后兜底：在 effMax 处强制切分
     return effMax;
   }
 
   /**
-   * 在文本中查找语义切分关键词的位置（返回关键词后的位置）。
-   * 语义关键词如"但是"、"however"等，确保在这些词后切分可以保持句子语义相对完整。
+   * 从 effMax 向前搜索语义关键词的位置（返回关键词后的位置）。
    */
-  private int findLastSemanticBreak(String text, int minPos, int limit) {
+  private int findLastSemanticBreakBackward(String text, int searchStart, int searchEnd) {
     String lower = text.toLowerCase();
-    int lastPos = -1;
+    int bestPos = -1;
     for (String keyword : SEMANTIC_BREAK_KEYWORDS) {
-      int idx = lower.indexOf(keyword, minPos);
-      if (idx >= minPos && idx < limit - 1) {
-        int breakPos = idx + keyword.length();
-        if (breakPos > lastPos) {
-          lastPos = breakPos;
+      // 在搜索范围内向前查找
+      for (int i = searchStart - keyword.length(); i >= searchEnd; i--) {
+        if (i >= 0 && i + keyword.length() <= textLen(lower)) {
+          int matchLen = keyword.length();
+          boolean match = true;
+          for (int j = 0; j < matchLen; j++) {
+            if (lower.charAt(i + j) != keyword.charAt(j)) {
+              match = false;
+              break;
+            }
+          }
+          if (match) {
+            int breakPos = i + matchLen;
+            if (breakPos > bestPos) {
+              bestPos = breakPos;
+            }
+          }
         }
       }
     }
-    return lastPos;
+    return bestPos;
   }
+
+  private int textLen(String s) { return s.length(); }
 
   private void trimLeadingSpaces() {
     while (!buffer.isEmpty() && buffer.charAt(0) == ' ') {
