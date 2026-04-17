@@ -253,7 +253,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const processorRef = useRef<AudioNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   // 简化播放状态：缓存音频 + 按 seq 顺序播放
@@ -855,20 +855,29 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         stopInternal();
       };
     });
-    const processor = audioContext.createScriptProcessor(1024, 1, 1);
-    processorRef.current = processor; streamRef.current = stream; audioCtxRef.current = audioContext;
-    capturePipelineStartedAtRef.current = Date.now();
-    lastLoudAudioAtRef.current = 0;
+    // AudioWorklet：在专用音频线程缓冲，每 100ms 发一次到主线程，不阻塞 UI/渲染
+    // chunkSamples = 100ms 对应的原生采样数（浏览器通常 48kHz → 4800）
+    const chunkSamples = Math.round(actualSr * 0.1);
+    await audioContext.audioWorklet.addModule("/audio-capture-processor.js");
+    const workletNode = new AudioWorkletNode(audioContext, "audio-capture-processor", {
+      processorOptions: { chunkSamples },
+    });
 
-    processor.onaudioprocess = (e) => {
-      const w = wsRef.current; if (!w || w.readyState !== WebSocket.OPEN) return;
-      const inp = e.inputBuffer.getChannelData(0);
+    workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
+      const w = wsRef.current;
+      if (!w || w.readyState !== WebSocket.OPEN) return;
+      const inp = e.data;
+      const workletReceiveTs = performance.now(); // AudioWorklet 接收时刻
+
+      // RMS 静音检测（与原逻辑一致）
       let sumSq = 0;
       for (let i = 0; i < inp.length; i++) sumSq += inp[i] * inp[i];
-      const rmsIn = Math.sqrt(sumSq / inp.length);
-      if (rmsIn > 0.0012) lastLoudAudioAtRef.current = Date.now();
+      const rms = Math.sqrt(sumSq / inp.length);
+      if (rms > 0.0012) lastLoudAudioAtRef.current = Date.now();
 
+      // 下采样（若 AudioContext 未能运行在目标采样率，则手动线性插值）
       let samples: Float32Array;
+      const resampleStartTs = performance.now();
       if (needResample) {
         const ratio = targetSampleRate / actualSr;
         const newLen = Math.round(inp.length * ratio);
@@ -883,21 +892,50 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
       } else {
         samples = inp;
       }
+      const resampleMs = performance.now() - resampleStartTs;
+
+      // Float32 → Int16
+      const i16StartTs = performance.now();
       const i16 = new Int16Array(samples.length);
-      for (let i = 0; i < samples.length; i++) { const s = Math.max(-1, Math.min(1, samples[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
+      for (let i = 0; i < samples.length; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      const i16Ms = performance.now() - i16StartTs;
+
+      const prevCum = micCumSentRef.current;
       micCumSentRef.current += i16.length;
       sentSampleRateRef.current = targetSampleRate;
+
       // 方案B：在 PCM 数据前附加 8 字节起始采样位置（BigInt64 大端序），供后端精确索引
+      const bufBuildStartTs = performance.now();
       const buf = new ArrayBuffer(8 + i16.byteLength);
-      new DataView(buf).setBigInt64(0, BigInt(micCumSentRef.current - i16.length), false);
+      const startSamplePos = BigInt(prevCum);
+      new DataView(buf).setBigInt64(0, startSamplePos, false);
       new Uint8Array(buf, 8).set(new Uint8Array(i16.buffer));
+      const bufBuildMs = performance.now() - bufBuildStartTs;
+
+      const wsSendStartTs = performance.now();
       w.send(buf);
+      const wsSendMs = performance.now() - wsSendStartTs;
+      const totalProcessingMs = performance.now() - workletReceiveTs;
+
+      console.debug("[AUDIO-WORKLET] samples=%d bufBytes=%d startSample=%s rms=%.4f " +
+        "resampleMs=%.2f i16Ms=%.2f bufBuildMs=%.2f wsSendMs=%.2f totalMs=%.2f " +
+        "actualSr=%d targetSr=%d needResample=%s",
+        samples.length, buf.byteLength, startSamplePos.toString(), rms,
+        resampleMs, i16Ms, bufBuildMs, wsSendMs, totalProcessingMs,
+        actualSr, targetSampleRate, needResample);
     };
+
+    processorRef.current = workletNode; streamRef.current = stream; audioCtxRef.current = audioContext;
+    capturePipelineStartedAtRef.current = Date.now();
+    lastLoudAudioAtRef.current = 0;
 
     const mute = audioContext.createGain();
     mute.gain.value = 0;
-    source.connect(processor);
-    processor.connect(mute);
+    source.connect(workletNode);
+    workletNode.connect(mute);
     mute.connect(audioContext.destination);
     setRunning(true);
   };
