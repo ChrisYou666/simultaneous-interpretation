@@ -1,0 +1,45 @@
+node_modules
+dist
+.env
+.env.local
+*.log
+backend-java/logs/
+.DS_Store
+backend-java/tools/
+backend-java/target/
+backend-java/src/main/resources/application-local.yml
+tsconfig.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+
+# Build outputs
+*.class
+*.jar
+*.war
+*.tar
+
+# Logs
+logs/
+*.log
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+
+# Docker (仅本地构建产物需忽略，配置文件应保留在仓库)
+# Dockerfile
+# docker-compose.yml
+# nginx.conf
+
+# Analysis files
+*.zip
+*.tar
+analyze_log*.ps1
+analyze_log*.py
+diff_*.txt
+user_main_*.txt
+readlog.ps1
