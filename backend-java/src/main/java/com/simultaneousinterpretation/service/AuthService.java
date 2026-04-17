@@ -2,7 +2,6 @@ package com.simultaneousinterpretation.service;
 
 import com.simultaneousinterpretation.common.BizException;
 import com.simultaneousinterpretation.common.Constants;
-import com.simultaneousinterpretation.domain.SiUser;
 import com.simultaneousinterpretation.domain.enums.ErrorCode;
 import com.simultaneousinterpretation.domain.vo.UserSessionVo;
 import com.simultaneousinterpretation.security.JwtService;

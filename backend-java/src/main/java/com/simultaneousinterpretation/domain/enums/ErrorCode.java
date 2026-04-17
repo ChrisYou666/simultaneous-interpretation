@@ -88,7 +88,6 @@ public enum ErrorCode {
     INTERNAL_ERROR(9001, "系统内部错误，请稍后再试"),
     SERVICE_UNAVAILABLE(9002, "服务暂不可用，请稍后再试"),
     OPERATION_TOO_FREQUENT(9003, "操作过于频繁，请稍后再试"),
-    DATABASE_ERROR(9004, "数据库错误"),
     CACHE_ERROR(9005, "缓存服务错误"),
     NETWORK_ERROR(9006, "网络错误，请检查网络连接"),
     UNKNOWN_ERROR(9099, "未知错误");

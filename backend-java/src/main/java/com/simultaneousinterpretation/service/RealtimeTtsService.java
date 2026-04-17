@@ -96,14 +96,6 @@ public class RealtimeTtsService {
     void onChunk(int segIdx, String tgtLang, byte[] audioData) throws IOException;
   }
 
-  /**
-   * 旧版回调接口（兼容）- 内部包装后调用新版
-   */
-  @FunctionalInterface
-  public interface LegacyAudioChunkCallback {
-    void onChunk(byte[] audioData) throws IOException;
-  }
-
   // ── 槽位管理 ──────────────────────────────────────────────────────────────
 
   private void enqueueTask(PendingTask task) {
@@ -334,14 +326,6 @@ public class RealtimeTtsService {
     return synthesizeStreamingImpl(text, lang, rate, segIdx, callback, onComplete);
   }
 
-  /**
-   * 兼容旧接口
-   */
-  public boolean synthesizeStreaming(String text, String lang, double rate, LegacyAudioChunkCallback legacyCallback) {
-    AudioChunkCallback wrapped = (segIdx, tgtLang, data) -> legacyCallback.onChunk(data);
-    return synthesizeStreamingImpl(text, lang, rate, -1, wrapped, null);
-  }
-
   private boolean synthesizeStreamingImpl(String text, String lang, double rate,
                                           int segIdx, AudioChunkCallback callback,
                                           Runnable onComplete) {
@@ -367,27 +351,6 @@ public class RealtimeTtsService {
     // 始终经由队列+限流调度，避免多路翻译同时完成时瞬间突发请求触发 DashScope 429
     enqueueTask(task);
     return true;
-  }
-
-  /**
-   * 同步 TTS（兼容旧接口）：内部调用流式合成并拼合，等待完成。
-   * 注意：会阻塞调用线程，请仅用于非延迟敏感的同步场景。
-   */
-  public byte[] synthesize(String text, String lang) {
-    ByteArrayOutputStream out = new ByteArrayOutputStream();
-    AtomicBoolean hasAudio = new AtomicBoolean(false);
-    CountDownLatch latch = new CountDownLatch(1);
-    synthesizeStreaming(text, lang, 1.0, (sIdx, tgtLang, data) -> {
-      out.write(data);
-      hasAudio.set(true);
-    });
-    try {
-      boolean finished = latch.await(30, TimeUnit.SECONDS);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
-    byte[] result = out.toByteArray();
-    return result.length > 0 ? result : null;
   }
 
   private String buildRequestBody(String text, String lang, String model, String voice) throws Exception {

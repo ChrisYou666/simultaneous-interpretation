@@ -9,15 +9,6 @@ logging:
 spring:
   application:
     name: si-backend
-  datasource:
-    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/si_assistant?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
-    username: ${MYSQL_USER:root}
-    # 空值会导致「using password: NO」。有密码时请在 application-local.yml 中配置，或使用 profile=local。
-    password: ${MYSQL_PASSWORD:}
-    driver-class-name: com.mysql.cj.jdbc.Driver
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
   codec:
     max-in-memory-size: 52MB
 

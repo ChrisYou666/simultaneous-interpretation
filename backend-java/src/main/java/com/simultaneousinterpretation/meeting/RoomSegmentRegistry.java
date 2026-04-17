@@ -148,21 +148,6 @@ public class RoomSegmentRegistry {
       notifyListeners(l -> l.onAudioEnd(roomId, segIdx, tgtLang, reason));
     }
 
-    // ── 同源语言 TTS 跳过（不合成 TTS，直接标记 skip） ─────────────────────
-
-    public void onSameLangSkip(int segIdx, String srcLang, String reason) {
-      SegmentRecord seg = segments.get(segIdx);
-      if (seg == null) {
-        log.warn("[Registry-SameLangSkip] segIdx={} 不存在 roomId={}", segIdx, roomId);
-        return;
-      }
-      seg.skipTts(srcLang);
-      seg.markAudioEndSent(srcLang);
-      log.info("[Registry-SameLangSkip] roomId={} segIdx={} srcLang={} reason={}",
-          roomId, segIdx, srcLang, reason);
-      // 同源听众不通过队列收音频，无需通知 Dispatcher
-    }
-
     /** 通用 TTS 跳过（用于 translate_failed / no_audio / error 等原因） */
     public void onTtsSkip(int segIdx, String tgtLang, String reason) {
       SegmentRecord seg = segments.get(segIdx);
