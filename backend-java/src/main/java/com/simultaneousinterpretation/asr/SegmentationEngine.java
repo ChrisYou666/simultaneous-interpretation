@@ -4,18 +4,26 @@ import com.simultaneousinterpretation.config.AsrProperties;
 import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
  * 切段引擎：将 ASR 输出切成适合翻译 + TTS 的短片段。
  *
- * <p>策略：
+ * <p>策略（参考商用同传方案优化）：
  * <ol>
  *   <li>收到 final 片段时，先在句末标点处预切，再追加到缓冲区</li>
- *   <li>缓冲区超过 maxChars → 在句号/逗号/空格处切出</li>
+ *   <li>缓冲区超过 maxChars → 在语义切分点/软标点处切出</li>
  *   <li>缓冲区以句末标点结尾且长度合理 → 立即切出</li>
  *   <li>距上次切出超过 flushTimeoutMs → 超时刷出</li>
  * </ol>
+ *
+ * <p>语义切分（参考搜狗/讯飞方案）：
+ * <ul>
+ *   <li>在语义关键词后切分（如"但是"、"however"），保证句子语义完整</li>
+ *   <li>关键词保留在当前段，避免将转折词/连接词截断到下一段</li>
+ *   <li>语义切分点优先级低于句末标点，但高于软标点</li>
+ * </ul>
  *
  * <p>语言自适应：英语句子平均词数约 8-15 词（平均 4-6 字符/词），
  * 相比中文（1-2 字符/词）需要更高的 maxChars 才能覆盖同等语义单元。
@@ -31,6 +39,35 @@ public class SegmentationEngine {
   private static final Pattern SENTENCE_END = Pattern.compile("[。？！.?!]$");
   private static final Pattern SENTENCE_SPLIT = Pattern.compile("(?<=[.?!。？！])\\s*");
   private static final Pattern PUNCT_SPLIT = Pattern.compile("[.?!。？！]");
+
+  /**
+   * 语义切分关键词：转折/递进/话题转换点，在这些词后切分可保证语义相对完整。
+   * 优先级低于句末标点，高于软标点。
+   * 使用 List.of() 避免 Set.of() 在有重复元素时抛出异常。
+   */
+  private static final Set<String> SEMANTIC_BREAK_KEYWORDS;
+  static {
+    SEMANTIC_BREAK_KEYWORDS = Set.of(
+      // 中文转折词
+      "但是", "可是", "然而", "不过", "只是",
+      // 中文递进/总结词
+      "而且", "此外", "同时", "另外", "还有", "并且", "更重要的是",
+      "所以", "因此", "总之", "综上所述", "于是",
+      // 中文话题转换词
+      "接下来", "现在", "关于", "说到", "谈到",
+      // 英文转折词
+      "but", "however", "actually", "well", "though", "yet", "still",
+      // 英文递进/总结词
+      "and", "also", "plus", "moreover", "furthermore", "in addition",
+      "so", "therefore", "thus", "hence", "as a result", "all in all", "in conclusion",
+      // 英文话题转换词
+      "now", "next", "about", "regarding", "moving on", "speaking of", "as for",
+      "first", "second", "third", "finally", "lastly",
+      // 印尼语转折/递进词
+      "tetapi", "namun", "jadi", "padahal", "maka", "karena itu",
+      "dan", "juga", "selain itu", "lebih lanjut"
+    );
+  }
 
   /**
    * 切段回调接口：每切出一个 segment 时立即回调。
@@ -266,12 +303,14 @@ public class SegmentationEngine {
   /**
    * Find the best position to split text. Priority:
    * 1. Sentence-ending punctuation (. ? !) between softBreakChars and maxChars
-   * 2. Soft break (comma, semicolon, space) in that range
-   * 3. Force split at maxChars
+   * 2. Semantic break keywords (but, however, therefore, etc.) - ensures semantic completeness
+   * 3. Soft break (comma, semicolon, space) in that range
+   * 4. Force split at maxChars
    */
   private int findBestSplit(String text, int effMax) {
     int limit = Math.min(text.length(), effMax + 5);
 
+    // 1. 优先在句末标点处切分
     int lastPunct = -1;
     for (int i = softBreakChars; i < limit; i++) {
       if (PUNCT_SPLIT.matcher(String.valueOf(text.charAt(i))).matches()) {
@@ -280,6 +319,11 @@ public class SegmentationEngine {
     }
     if (lastPunct > 0) return lastPunct;
 
+    // 2. 在语义切分关键词后切分（确保语义完整）
+    int lastSemantic = findLastSemanticBreak(text, softBreakChars, limit);
+    if (lastSemantic > 0) return lastSemantic;
+
+    // 3. 在软标点处切分
     int lastSoft = -1;
     for (int i = softBreakChars; i < limit; i++) {
       char c = text.charAt(i);
@@ -289,12 +333,32 @@ public class SegmentationEngine {
     }
     if (lastSoft > 0) return lastSoft;
 
+    // 4. 搜索更早的软标点
     for (int i = softBreakChars - 1; i > 0; i--) {
       char c = text.charAt(i);
       if (c == ' ' || c == ',' || c == '，') return i + 1;
     }
 
     return effMax;
+  }
+
+  /**
+   * 在文本中查找语义切分关键词的位置（返回关键词后的位置）。
+   * 语义关键词如"但是"、"however"等，确保在这些词后切分可以保持句子语义相对完整。
+   */
+  private int findLastSemanticBreak(String text, int minPos, int limit) {
+    String lower = text.toLowerCase();
+    int lastPos = -1;
+    for (String keyword : SEMANTIC_BREAK_KEYWORDS) {
+      int idx = lower.indexOf(keyword, minPos);
+      if (idx >= minPos && idx < limit - 1) {
+        int breakPos = idx + keyword.length();
+        if (breakPos > lastPos) {
+          lastPos = breakPos;
+        }
+      }
+    }
+    return lastPos;
   }
 
   private void trimLeadingSpaces() {
