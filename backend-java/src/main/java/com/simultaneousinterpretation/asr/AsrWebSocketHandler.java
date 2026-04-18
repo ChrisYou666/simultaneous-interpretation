@@ -7,6 +7,7 @@ import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesisParam;
 import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesisAudioFormat;
 import com.alibaba.dashscope.audio.tts.SpeechSynthesisResult;
 import com.alibaba.dashscope.common.ResultCallback;
+import io.reactivex.Flowable;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -258,36 +259,24 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     /**
-     * 触发翻译和 TTS（使用连接池）
+     * 触发翻译和 TTS（连接池 + streamingCallAsFlowable 流式发送）
      */
     private void triggerTranslationAndTts(String text, String sourceLang, int segIdx,
                                           long segmentTs, String roomId, int floor) {
         // ── 源语链：直接 TTS ──────────────────────────────────────────────
-        if (roomWebSocketHandler != null) {
-            CompletableFuture.runAsync(() -> {
-                    try {
-                        TtsConnectionPool.Lang poolLang = toPoolLang(sourceLang);
-                        SpeechSynthesizer synthesizer = ttsConnectionPool.borrow(poolLang);
-                        try {
-                            SpeechSynthesisParam param = SpeechSynthesisParam.builder()
-                                    .model(ttsProperties.getModel())
-                                    .voice(sourceLang.equals("zh") ? ttsProperties.getVoiceZh() : ttsProperties.getVoiceEn())
-                                    .format(SpeechSynthesisAudioFormat.PCM_16000HZ_MONO_16BIT)
-                                    .apiKey(getApiKey())
-                                    .build();
-
-                            TtsCallback callback = new TtsCallback(segIdx, 0, sourceLang, roomId, roomWebSocketHandler);
-                            synthesizer.updateParamAndCallback(param, callback);
-                            synthesizer.streamingCall(text);
-                            synthesizer.streamingComplete(ttsProperties.getTimeoutSec() * 1000L + 10_000L);
-                        } finally {
-                            ttsConnectionPool.returnObject(poolLang, synthesizer);
-                        }
-                    } catch (Exception e) {
-                        log.error("[TTS-SOURCE] segIdx={} lang={} error={}", segIdx, sourceLang, e.getMessage());
-                    }
-            });
-        }
+        CompletableFuture.runAsync(() -> {
+            TtsConnectionPool.Lang poolLang = toPoolLang(sourceLang);
+            SpeechSynthesizer synthesizer = null;
+            try {
+                synthesizer = ttsConnectionPool.borrow(poolLang);
+                doTts(synthesizer, buildTtsParam(sourceLang), text, segIdx, sourceLang, roomId);
+                roomWebSocketHandler.broadcastFramedAudioEnd(roomId, segIdx, sourceLang);
+            } catch (Exception e) {
+                log.error("[TTS-SOURCE] segIdx={} lang={} error={}", segIdx, sourceLang, e.getMessage());
+            } finally {
+                if (synthesizer != null) ttsConnectionPool.returnObject(poolLang, synthesizer);
+            }
+        }, translateExecutor);
 
         // ── 目标语链：翻译 → TTS ─────────────────────────────────────────
         for (String targetLang : ALL_LANGS) {
@@ -296,7 +285,6 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             final String tgt = targetLang;
             CompletableFuture.runAsync(() -> {
                 try {
-                    // 翻译
                     TranslateRequest req = new TranslateRequest();
                     req.setSegment(text);
                     req.setSourceLang(sourceLang);
@@ -311,38 +299,20 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
                         log.warn("[PIPE-3-XLAT-EMPTY] segIdx={} tgt={} durationMs={}", segIdx, tgt, xlMs);
                         return;
                     }
-
                     log.info("[PIPE-3-XLAT-DONE] segIdx={} tgt={} durationMs={} textLen={}",
                             segIdx, tgt, xlMs, translated.length());
 
-                    // 广播翻译结果
                     broadcastTranslation(roomId, segIdx, text, translated, sourceLang, tgt, floor, segmentTs);
 
-                    // TTS
-                    if (roomWebSocketHandler != null) {
-                        TtsConnectionPool.Lang poolLang = toPoolLang(tgt);
-                        SpeechSynthesizer synthesizer = ttsConnectionPool.borrow(poolLang);
-                        try {
-                            SpeechSynthesisParam param = SpeechSynthesisParam.builder()
-                                    .model(ttsProperties.getModel())
-                                    .voice(tgt.equals("zh") ? ttsProperties.getVoiceZh() : ttsProperties.getVoiceEn())
-                                    .format(SpeechSynthesisAudioFormat.PCM_16000HZ_MONO_16BIT)
-                                    .apiKey(getApiKey())
-                                    .build();
-
-                            TtsCallback callback = new TtsCallback(segIdx, 0, tgt, roomId, roomWebSocketHandler);
-                            synthesizer.updateParamAndCallback(param, callback);
-                            synthesizer.streamingCall(translated);
-                            synthesizer.streamingComplete(ttsProperties.getTimeoutSec() * 1000L + 10_000L);
-                        } finally {
-                            ttsConnectionPool.returnObject(poolLang, synthesizer);
-                        }
+                    TtsConnectionPool.Lang poolLang = toPoolLang(tgt);
+                    SpeechSynthesizer synthesizer = null;
+                    try {
+                        synthesizer = ttsConnectionPool.borrow(poolLang);
+                        doTts(synthesizer, buildTtsParam(tgt), translated, segIdx, tgt, roomId);
+                    } finally {
+                        if (synthesizer != null) ttsConnectionPool.returnObject(poolLang, synthesizer);
                     }
-
-                    // 发送 END 信号
-                    if (roomWebSocketHandler != null) {
-                        roomWebSocketHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
-                    }
+                    roomWebSocketHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
 
                 } catch (Exception e) {
                     log.error("[PIPE-3] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage(), e);
@@ -350,6 +320,44 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             }, translateExecutor);
         }
     }
+
+    /**
+     * 构建 TTS 参数（24kHz PCM，使用 TtsProperties 中的音色配置）
+     */
+    private SpeechSynthesisParam buildTtsParam(String lang) {
+        return SpeechSynthesisParam.builder()
+                .model(ttsProperties.getModel())
+                .voice(ttsProperties.getVoice(lang))
+                .format(SpeechSynthesisAudioFormat.PCM_24000HZ_MONO_16BIT)
+                .apiKey(getApiKey())
+                .build();
+    }
+
+    /**
+     * 使用 streamingCallAsFlowable 流式发送文本并接收音频。
+     * 相比 streamingCall，允许按语义分块发送，降低首帧延迟。
+     */
+    private void doTts(SpeechSynthesizer synthesizer, SpeechSynthesisParam param,
+                       String text, int segIdx, String lang, String roomId) throws Exception {
+        synthesizer.updateParamAndCallback(param, NOOP_CALLBACK);
+        synthesizer.streamingCallAsFlowable(Flowable.just(text))
+                .blockingForEach(result -> {
+                    ByteBuffer audio = result.getAudioFrame();
+                    if (audio != null && audio.hasRemaining()) {
+                        byte[] bytes = new byte[audio.remaining()];
+                        audio.get(bytes);
+                        roomWebSocketHandler.broadcastFramedAudioChunk(roomId, segIdx, 0, lang, bytes);
+                    }
+                });
+    }
+
+    /** streamingCallAsFlowable 不走 callback 路径，用 noop 避免 NPE */
+    private static final ResultCallback<SpeechSynthesisResult> NOOP_CALLBACK =
+            new ResultCallback<>() {
+                @Override public void onEvent(SpeechSynthesisResult r) {}
+                @Override public void onComplete() {}
+                @Override public void onError(Exception e) {}
+            };
 
     private TtsConnectionPool.Lang toPoolLang(String lang) {
         if ("zh".equalsIgnoreCase(lang)) return TtsConnectionPool.Lang.ZH;
@@ -569,42 +577,4 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         sendPayload(session, m);
     }
 
-    // ─── TTS 回调 ─────────────────────────────────────────────────────────────
-
-    private static class TtsCallback extends ResultCallback<SpeechSynthesisResult> {
-        private final int segIdx;
-        private final int sentenceIdx;
-        private final String lang;
-        private final String roomId;
-        private final RoomWebSocketHandler roomWsHandler;
-
-        public TtsCallback(int segIdx, int sentenceIdx, String lang, String roomId,
-                          RoomWebSocketHandler roomWsHandler) {
-            this.segIdx = segIdx;
-            this.sentenceIdx = sentenceIdx;
-            this.lang = lang;
-            this.roomId = roomId;
-            this.roomWsHandler = roomWsHandler;
-        }
-
-        @Override
-        public void onEvent(SpeechSynthesisResult result) {
-            ByteBuffer audio = result.getAudioFrame();
-            if (audio == null || !audio.hasRemaining()) return;
-
-            byte[] bytes = new byte[audio.remaining()];
-            audio.get(bytes);
-            roomWsHandler.broadcastFramedAudioChunk(roomId, segIdx, sentenceIdx, lang, bytes);
-        }
-
-        @Override
-        public void onComplete() {
-            // log.debug("[TTS-CB] complete segIdx={} lang={}", segIdx, lang);
-        }
-
-        @Override
-        public void onError(Exception e) {
-            log.error("[TTS-CB-ERROR] segIdx={} lang={} error={}", segIdx, lang, e.getMessage());
-        }
-    }
 }

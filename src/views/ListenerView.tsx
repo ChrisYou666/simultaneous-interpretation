@@ -130,7 +130,7 @@ export function ListenerView() {
       const float = new Float32Array(samples);
       for (let i = 0; i < samples; i++) float[i] = pcm.getInt16(i * 2, true) / 32768;
 
-      const audioBuf = ctx.createBuffer(1, samples, 16000);
+      const audioBuf = ctx.createBuffer(1, samples, 24000);
       audioBuf.copyToChannel(float, 0);
 
       // 追加到全局时间轴末尾；若时间轴落后于当前时刻，从 currentTime + 50ms 重新开始
