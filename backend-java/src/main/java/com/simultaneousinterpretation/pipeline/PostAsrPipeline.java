@@ -2,11 +2,13 @@ package com.simultaneousinterpretation.pipeline;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.simultaneousinterpretation.api.dto.TranslateRequest;
+import com.simultaneousinterpretation.asr.AsrWebSocketHandler;
 import com.simultaneousinterpretation.meeting.RoomWebSocketHandler;
 import com.simultaneousinterpretation.service.AiTranslateService;
 import com.simultaneousinterpretation.service.RealtimeTtsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -33,6 +35,7 @@ public class PostAsrPipeline {
     private final RealtimeTtsService ttsService;
     private final RoomWebSocketHandler roomWsHandler;
     private final ObjectMapper objectMapper;
+    private final AsrWebSocketHandler asrWsHandler;
 
     // 8 线程：最多 3 路 TTS + 2 路翻译并行，留余量
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
@@ -40,11 +43,13 @@ public class PostAsrPipeline {
     public PostAsrPipeline(AiTranslateService translateService,
                            RealtimeTtsService ttsService,
                            RoomWebSocketHandler roomWsHandler,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           @Lazy AsrWebSocketHandler asrWsHandler) {
         this.translateService = translateService;
         this.ttsService = ttsService;
         this.roomWsHandler = roomWsHandler;
         this.objectMapper = objectMapper;
+        this.asrWsHandler = asrWsHandler;
     }
 
     /**
@@ -108,8 +113,18 @@ public class PostAsrPipeline {
                     ev.put("segmentTs", segmentTs);
                     ev.put("serverTs", System.currentTimeMillis());
 
-                    roomWsHandler.broadcastJsonToAll(roomId, objectMapper.writeValueAsString(ev));
-                    log.info("[Pipeline] 翻译广播 src={} tgt={} segIdx={} len={}",
+                    String evJson = objectMapper.writeValueAsString(ev);
+                    log.info("[Pipeline] ★ 翻译完成，准备广播 roomId={} src={} tgt={} segIdx={} text=\"{}\"",
+                            roomId, sourceLang, tgt, segIdx,
+                            text.length() > 50 ? text.substring(0, 50) + "..." : text);
+
+                    // 向主持端发送（主持端连接 ASR WS，通过 room WS 无法到达）
+                    asrWsHandler.sendToHost(roomId, evJson);
+                    log.info("[Pipeline] 已通过 ASR WS 发送到主持端 roomId={}", roomId);
+
+                    // 向所有听众广播（听众连接 room WS）
+                    roomWsHandler.broadcastJsonToAll(roomId, evJson);
+                    log.info("[Pipeline] 翻译广播完成 src={} tgt={} segIdx={} len={}",
                             sourceLang, tgt, segIdx, translated.length());
 
                     // 翻译语言 TTS

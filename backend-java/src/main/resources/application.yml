@@ -72,11 +72,11 @@ app:
   # TTS：CosyVoice 流式合成，三语分别配置音色
   tts:
     api-key: ${TTS_API_KEY:${DASHSCOPE_API_KEY:}}
-    model: ${TTS_MODEL:cosyvoice-v2}
+    model: ${TTS_MODEL:cosyvoice-v3-flash}
     voice-zh: ${TTS_VOICE_ZH:longanyang}
-    voice-en: ${TTS_VOICE_EN:loongabby_v3}
-    voice-id: ${TTS_VOICE_ID:loongindah_v3}
-    sample-rate: ${TTS_SAMPLE_RATE:16000}
+    voice-en: ${TTS_VOICE_EN:longanhuan}
+    voice-id: ${TTS_VOICE_ID:longanhuan}
+    sample-rate: ${TTS_SAMPLE_RATE:24000}
 
   # ASR 调参（支持运行时 /api/tuning/params 动态修改）
   tuning:

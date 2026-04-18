@@ -551,14 +551,17 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
       setErr(parts.length > 0 ? parts.join("\n\n") : "ASR 错误"); return;
     }
     if (ev.event === "transcript") {
+      const handleStart = performance.now();
       if (ev.language) {
         const n = normalizeLangCode(ev.language);
         setDetectedLang(n ?? ev.language);
       }
       if (ev.partial) {
-        const raw = ev.text;
+        const raw = ev.text ?? "";
         partialRef.current = raw;
         const shown = raw.length > 60 ? `…${raw.slice(-59)}` : raw;
+        const handleMs = performance.now() - handleStart;
+        console.info("[Panel-TRANSCRIPT] ★ partial=true textLen=%d shownLen=%d handleMs=%.2f", raw.length, shown.length, handleMs);
         setPartial(shown);
         setLiveTranscript(shown);
       }
@@ -836,11 +839,21 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
     const actualSr = audioContext.sampleRate;
     const needResample = Math.abs(actualSr - targetSampleRate) > 50;
     ws.onmessage = (m) => {
-      console.info("[ASR-WS-MSG] binaryType=%s size=%d bytes", typeof m.data === "string" ? "text" : "binary", m.data instanceof ArrayBuffer ? m.data.byteLength : (typeof m.data === "string" ? m.data.length : 0));
+      const receiveTs = performance.now();
+      const msgSize = m.data instanceof ArrayBuffer ? m.data.byteLength : (typeof m.data === "string" ? m.data.length : 0);
+      console.info("[ASR-WS-MSG] ★ receiveTs=%.2f binaryType=%s size=%d bytes", receiveTs, typeof m.data === "string" ? "text" : "binary", msgSize);
       if (typeof m.data !== "string") return;
       try {
         const parsed = parseAsrServerEvent(m.data);
-        if (parsed) handleEvent(parsed);
+        if (parsed) {
+          if (parsed.event === "transcript") {
+            const isPartial = (parsed as any).partial;
+            const text = (parsed as any).text ?? "";
+            console.info("[ASR-WS-MSG-TRANSCRIPT] ★ event=transcript partial=%s textLen=%d text=\"%s\"",
+              isPartial, text.length, text.slice(0, 50));
+          }
+          handleEvent(parsed);
+        }
       } catch (e) {
         console.error("[ASR] 下行消息处理异常", e);
       }

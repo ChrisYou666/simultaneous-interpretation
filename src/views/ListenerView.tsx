@@ -326,9 +326,17 @@ export function ListenerView() {
     };
 
     ws.onmessage = (m) => {
+      const receiveTs = performance.now();
       if (typeof m.data === "string") {
         try {
-          handleEventRef.current(JSON.parse(m.data) as AsrServerMessage);
+          const parsed = JSON.parse(m.data) as AsrServerMessage;
+          if (parsed.event === "transcript") {
+            const isPartial = (parsed as any).partial;
+            const text = (parsed as any).text ?? "";
+            console.info("[Listener-WS-MSG-TRANSCRIPT] ★ receiveTs=%.2f event=transcript partial=%s textLen=%d text=\"%s\"",
+              receiveTs, isPartial, text.length, text.slice(0, 50));
+          }
+          handleEventRef.current(parsed);
         } catch { /* ok */ }
       } else {
         // 二进制音频帧

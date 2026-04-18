@@ -1,5 +1,6 @@
 package com.simultaneousinterpretation.meeting;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -136,6 +137,9 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
    * 向房间内所有听众广播 JSON 文本消息。
    */
   public void broadcastJsonToListeners(String roomId, String json) {
+    long entryNs = System.nanoTime();
+    long entryMs = System.currentTimeMillis();
+
     Set<WebSocketSession> listeners = listenerSessions.get(roomId);
     if (listeners == null || listeners.isEmpty()) {
       log.debug("[房间WS-JSON-DRY] roomId={} reason=no_listeners", roomId);
@@ -143,43 +147,66 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     }
 
     String eventType = "unknown";
+    String textPreview = "";
     try {
-      eventType = objectMapper.readTree(json).get("event").asText("unknown");
+      JsonNode node = objectMapper.readTree(json);
+      eventType = node.get("event").asText("unknown");
+      String text = node.path("text").asText("");
+      textPreview = text.length() > 30 ? text.substring(0, 30) + "..." : text;
     } catch (Exception ignored) {}
 
     int sent = 0;
     for (WebSocketSession s : listeners) {
       if (!s.isOpen()) continue;
+      long beforeSendNs = System.nanoTime();
       try {
         s.sendMessage(new TextMessage(json));
+        long afterSendNs = System.nanoTime();
+        long sendNs = afterSendNs - beforeSendNs;
         sent++;
+        if ("transcript".equals(eventType)) {
+          log.info("[房间WS-LISTENER-SEND] ★ roomId={} listener={} event={} sendNs={} text=\"{}\"",
+              roomId, s.getId(), eventType, sendNs, textPreview);
+        }
       } catch (IOException e) {
         log.debug("[房间WS-JSON-SEND-FAIL] session={} err={}", s.getId(), e.getMessage());
       }
     }
-    log.info("[房间WS-JSON-BROADCAST] ★SENT★ roomId={} event={} sent={}/{} size={}",
-        roomId, eventType, sent, listeners.size(), json.length());
+    long totalNs = System.nanoTime() - entryNs;
+    log.info("[房间WS-JSON-BROADCAST] ★SENT★ roomId={} event={} sent={}/{} totalNs={} size={} entryMs={}",
+        roomId, eventType, sent, listeners.size(), totalNs, json.length(), entryMs);
   }
 
   /**
    * 向房间内所有用户（主持端 + 全部听众）广播 JSON 文本消息。
    */
   public void broadcastJsonToAll(String roomId, String json) {
+    String eventType = "unknown";
+    try {
+      eventType = objectMapper.readTree(json).get("event").asText("unknown");
+    } catch (Exception ignored) {}
+
     int sent = 0;
 
     // 发送给主持人
     WebSocketSession host = hostSessions.get(roomId);
+    log.info("[房间WS-BROADCAST-ALL] ★ roomId={} event={} hostSession={} hostOpen={}",
+        roomId, eventType, host != null ? "存在" : "不存在", host != null ? host.isOpen() : "N/A");
     if (host != null && host.isOpen()) {
       try {
         host.sendMessage(new TextMessage(json));
         sent++;
+        log.info("[房间WS-BROADCAST-ALL] ★ 主持端发送成功 sessionId={}", host.getId());
       } catch (IOException | IllegalStateException e) {
-        log.debug("[房间WS] 发送主持端失败: {}", e.getMessage());
+        log.warn("[房间WS] 发送主持端失败 sessionId={}: {}", host.getId(), e.getMessage());
       }
+    } else {
+      log.warn("[房间WS-BROADCAST-ALL] ★ 主持端未连接，无法发送 event={} roomId={}", eventType, roomId);
     }
 
     // 发送给所有听众
     Set<WebSocketSession> listeners = listenerSessions.get(roomId);
+    log.info("[房间WS-BROADCAST-ALL] ★ roomId={} 听众数量={}", roomId, listeners != null ? listeners.size() : 0);
     if (listeners != null && !listeners.isEmpty()) {
       for (WebSocketSession s : listeners) {
         if (!s.isOpen()) continue;
@@ -191,11 +218,6 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         }
       }
     }
-
-    String eventType = "unknown";
-    try {
-      eventType = objectMapper.readTree(json).get("event").asText("unknown");
-    } catch (Exception ignored) {}
 
     log.info("[房间WS-BROADCAST-ALL] roomId={} event={} sent={}", roomId, eventType, sent);
   }

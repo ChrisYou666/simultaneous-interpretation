@@ -56,49 +56,85 @@ final class AsrClientTextOutboundQueue {
   }
 
   private static void runDrain(WebSocketSession session, LinkedBlockingQueue<String> q) {
+    String sessionId = session.getId();
+    long threadId = Thread.currentThread().getId();
+    log.info("[LAT-THREAD] ★★★ sessionId={} 队列消费线程启动 threadId={}", sessionId, threadId);
+
     try {
       while (true) {
+        long beforeTakeNs = System.nanoTime();
         String msg = q.take();
+        long afterTakeNs = System.nanoTime();
+        long queueWaitNs = afterTakeNs - beforeTakeNs;
+        int queueSizeBefore = q.size() + 1;
+
         if (POISON.equals(msg)) {
+          log.info("[LAT-POISON] sessionId={} 收到停止信号，退出队列消费", sessionId);
           break;
         }
-        synchronized (session) {
-          if (!session.isOpen()) {
-            break;
-          }
-          session.sendMessage(new TextMessage(msg));
-        }
-        long hostSendWallMs = System.currentTimeMillis();
-        // 解析 event 类型，为 segment/translation 事件记录主持人 WebSocket 发送成功时刻
+
+        // 解析消息类型
         String eventType = "";
         int segIdx = -1;
         String tgtLang = "";
+        String textPreview = "";
         try {
           com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(msg);
           eventType = node.path("event").asText("");
           segIdx = node.path("index").asInt(-1);
           tgtLang = node.path("targetLang").asText("");
+          String text = node.path("text").asText("");
+          textPreview = text.length() > 30 ? text.substring(0, 30) + "..." : text;
         } catch (Exception ignored) {}
-        if ("segment".equals(eventType) || "translation".equals(eventType) || "tts_skip".equals(eventType) || "transcript".equals(eventType)) {
-          log.info("[LAT] host_ws_send sessionId={} event={} segIdx={} targetLang=\"{}\" wallMs={}",
-              session.getId(), eventType, segIdx, tgtLang, hostSendWallMs);
+
+        long beforeSendNs = System.nanoTime();
+        synchronized (session) {
+          if (!session.isOpen()) {
+            log.warn("[LAT-SEND] sessionId={} session已关闭，跳过发送 event={}", sessionId, eventType);
+            continue;
+          }
+          session.sendMessage(new TextMessage(msg));
         }
+        long afterSendNs = System.nanoTime();
+        long sendNs = afterSendNs - beforeSendNs;
+
+        long hostSendWallMs = System.currentTimeMillis();
+
+        if ("transcript".equals(eventType) || "segment".equals(eventType) || "translation".equals(eventType)) {
+          log.info("[LAT-WEBSOCKET-SEND] ★★★ sessionId={} 发送成功: " +
+              "event={} segIdx={} text=\"{}\" " +
+              "queueWaitNs={} sendNs={} totalNs={} " +
+              "queueSize={} msgLen={} wallMs={}",
+              sessionId, eventType, segIdx, textPreview,
+              queueWaitNs, sendNs, queueWaitNs + sendNs,
+              queueSizeBefore, msg.length(), hostSendWallMs);
+        }
+
+        // 转发给房间听众
         @SuppressWarnings("unchecked")
         BiConsumer<WebSocketSession, String> after =
             (BiConsumer<WebSocketSession, String>) session.getAttributes().get(ATTR_AFTER_HOST_SENT);
         if (after != null && session.isOpen()) {
+          long beforeForwardNs = System.nanoTime();
           try {
             after.accept(session, msg);
           } catch (Exception ex) {
-            log.warn("[ASR] 主持下行后房间转发回调异常: {}", ex.getMessage());
+            log.warn("[ASR-FORWARD] sessionId={} 房间转发异常: {}", sessionId, ex.getMessage());
+          }
+          long afterForwardNs = System.nanoTime();
+          long forwardNs = afterForwardNs - beforeForwardNs;
+          if ("transcript".equals(eventType)) {
+            log.info("[LAT-FORWARD] ★ sessionId={} 房间转发完成 forwardNs={}", sessionId, forwardNs);
           }
         }
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      log.info("[LAT-INTERRUPT] sessionId={} 队列消费线程被中断", sessionId);
     } catch (Exception e) {
-      log.warn("[ASR] 客户端 JSON 下行异常: {}", e.getMessage());
+      log.warn("[LAT-EXCEPTION] sessionId={} 队列消费异常: {}", sessionId, e.getMessage());
     }
+    log.info("[LAT-THREAD] sessionId={} 队列消费线程退出", sessionId);
   }
 
   @SuppressWarnings("unchecked")
@@ -112,9 +148,21 @@ final class AsrClientTextOutboundQueue {
       }
       return;
     }
+    // 会话已关闭时直接丢弃，避免入队后发送失败
+    synchronized (session) {
+      if (!session.isOpen()) {
+        log.debug("[LAT] json_dropped sessionId={} session_closed", session.getId());
+        return;
+      }
+    }
     try {
       q.put(json);
-      log.debug("[LAT] json_enqueue sessionId={} queueSize={}", session.getId(), q.size());
+      // 解析消息类型用于日志
+      String eventType = "";
+      try {
+        eventType = objectMapper.readTree(json).path("event").asText("");
+      } catch (Exception ignored) {}
+      log.debug("[LAT] json_enqueue sessionId={} event={} queueSize={}", session.getId(), eventType, q.size());
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new IOException("interrupted", e);

@@ -63,6 +63,9 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     private final LanguageDetectionService languageDetectionService;
     private final PostAsrPipeline postAsrPipeline;
 
+    /** roomId -> 主持端 ASR WebSocket session（用于向主持端发送翻译事件） */
+    private final Map<String, WebSocketSession> hostAsrSessions = new java.util.concurrent.ConcurrentHashMap<>();
+
     public AsrWebSocketHandler(
             AsrProperties asrProperties,
             DashScopeSdkWrapper sdkWrapper,
@@ -92,6 +95,12 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         String roomId = (String) session.getAttributes().get(JwtHandshakeInterceptor.ATTR_ROOM_ID);
 
         log.info("[ASR-CONNECT] sessionId={} user={} floor={} roomId={}", sessionId, user, floor, roomId);
+
+        // 保存主持端 session，用于向主持端发送翻译事件
+        if (roomId != null) {
+            hostAsrSessions.put(roomId, session);
+            log.info("[ASR-SESSION] 保存主持端 session roomId={} sessionId={}", roomId, sessionId);
+        }
 
         AsrClientTextOutboundQueue.start(session, this::relayOutboundJsonAfterHostSent);
 
@@ -137,6 +146,8 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     // ─── SDK 回调 ─────────────────────────────────────────────────────────────
 
     private void handleSdkResult(WebSocketSession session, TranslationRecognizerResult result) {
+        long handlerEntryNs = System.nanoTime();
+        long handlerEntryMs = System.currentTimeMillis();
         String sessionId = session.getId();
         int floor  = (Integer) session.getAttributes().getOrDefault(JwtHandshakeInterceptor.ATTR_FLOOR, 1);
         String roomId = (String) session.getAttributes().get(JwtHandshakeInterceptor.ATTR_ROOM_ID);
@@ -148,16 +159,19 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         if (!StringUtils.hasText(text)) return;
 
         boolean isFinal = result.isSentenceEnd();
-
-        ((AtomicLong) session.getAttributes()
+        long resultsCount = ((AtomicLong) session.getAttributes()
                 .computeIfAbsent("asr.resultsReceived", k -> new AtomicLong(0))).incrementAndGet();
 
-        log.info("[SDK-RESULT] sessionId={} isFinal={} text=\"{}\"",
-                sessionId, isFinal, truncate(text, 80));
+        log.info("[SDK-RESULT] ★★★ sessionId={} #{} isFinal={} text=\"{}\" textLen={} entryMs={}",
+                sessionId, resultsCount, isFinal, truncate(text, 60), text.length(), handlerEntryMs);
 
         // ── 始终广播 transcript（partial 或 final）给主持端 + 听众端 ──────────
         // partial 不做语言检测，复用上一次 final 检测结果（或默认 zh）
+        long beforeLangNs = System.nanoTime();
         String cachedLang = (String) session.getAttributes().getOrDefault(ATTR_CURRENT_SRC_LANG, "zh");
+        long langGetNs = System.nanoTime() - beforeLangNs;
+
+        long beforeBuildNs = System.nanoTime();
         Map<String, Object> transcriptPayload = new HashMap<>();
         transcriptPayload.put("event", "transcript");
         transcriptPayload.put("partial", !isFinal);
@@ -165,17 +179,30 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         transcriptPayload.put("language", cachedLang);
         transcriptPayload.put("confidence", 1.0);
         transcriptPayload.put("floor", floor);
+        long buildPayloadNs = System.nanoTime() - beforeBuildNs;
+
+        long beforeSendNs = System.nanoTime();
         try {
             sendPayload(session, transcriptPayload);
         } catch (IOException e) {
-            log.debug("[SDK-RESULT] sessionId={} 发送 transcript 失败", sessionId, e);
+            log.error("[SDK-RESULT] sessionId={} 发送 transcript 失败", sessionId, e);
+            return;
         }
+        long sendPayloadNs = System.nanoTime() - beforeSendNs;
+        long totalHandlerNs = System.nanoTime() - handlerEntryNs;
+
+        log.info("[SDK-RESULT-TRANSCRIPT] ★★★ sessionId={} 发送完成: " +
+                "langGetNs={} buildNs={} sendNs={} totalNs={} " +
+                "cachedLang={} isFinal={} textLen={}",
+                sessionId, langGetNs, buildPayloadNs, sendPayloadNs, totalHandlerNs,
+                cachedLang, isFinal, text.length());
 
         // ── Final：语言检测 → 注册段 → 广播 segment 事件 → 触发翻译+TTS ──────
         if (isFinal) {
-            // 只在 final 时做一次语言检测（整句准确率更高，也避免 partial 频繁调用）
+            long beforeLangDetectNs = System.nanoTime();
             String detectedLang = languageDetectionService.detect(text);
             if (detectedLang == null || detectedLang.isBlank()) detectedLang = "zh";
+            long langDetectNs = System.nanoTime() - beforeLangDetectNs;
 
             long serverTs = System.currentTimeMillis();
             session.getAttributes().put(ATTR_CURRENT_SRC_LANG, detectedLang);
@@ -207,16 +234,18 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             segPayload.put("segmentTs", serverTs);
             segPayload.put("inputSampleRate", asrProperties.getDashscope().getSampleRate());
 
+            long beforeSegSendNs = System.nanoTime();
             try {
                 sendPayload(session, segPayload);
             } catch (IOException e) {
                 log.debug("[SDK-RESULT] sessionId={} 发送 segment 失败", sessionId, e);
             }
+            long segSendNs = System.nanoTime() - beforeSegSendNs;
 
-            log.info("[SEG-EMIT] sessionId={} segIdx={} lang={} text=\"{}\"",
-                    sessionId, segIdx, detectedLang, truncate(text, 60));
+            log.info("[SEG-EMIT] ★★★ sessionId={} segIdx={} lang={} " +
+                    "langDetectNs={} segSendNs={} text=\"{}\"",
+                    sessionId, segIdx, detectedLang, langDetectNs, segSendNs, truncate(text, 50));
 
-            // 触发异步翻译 + TTS 流水线
             if (roomId != null && segIdx >= 0) {
                 final String finalLang = detectedLang;
                 final int finalSegIdx = segIdx;
@@ -300,11 +329,49 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         sdkWrapper.stop(sessionId);
         AsrClientTextOutboundQueue.stop(session);
 
-        if (StringUtils.hasText(roomId) && roomWebSocketHandler != null) {
+        // 清理主持端 session
+        if (StringUtils.hasText(roomId)) {
+            hostAsrSessions.remove(roomId);
+            log.info("[ASR-SESSION] 清理主持端 session roomId={}", roomId);
+        }
+
+        if (roomWebSocketHandler != null) {
             roomWebSocketHandler.notifyListenersHostAsrStatus(roomId, "stopped");
         }
 
         super.afterConnectionClosed(session, status);
+    }
+
+    // ─── 公共方法（供 PostAsrPipeline 调用）────────────────────────────────────
+
+    /**
+     * 向主持端的 ASR WebSocket 发送 JSON 消息。
+     * 用于发送 translation 事件给主持端。
+     *
+     * @param roomId 房间 ID
+     * @param json   JSON 消息字符串
+     * @return 是否发送成功
+     */
+    public boolean sendToHost(String roomId, String json) {
+        WebSocketSession session = hostAsrSessions.get(roomId);
+        if (session == null) {
+            log.warn("[ASR-SEND-TO-HOST] roomId={} 主持端 session 不存在", roomId);
+            return false;
+        }
+        if (!session.isOpen()) {
+            log.warn("[ASR-SEND-TO-HOST] roomId={} 主持端 session 已关闭", roomId);
+            hostAsrSessions.remove(roomId);
+            return false;
+        }
+        try {
+            session.sendMessage(new TextMessage(json));
+            log.info("[ASR-SEND-TO-HOST] ★ 成功发送到主持端 roomId={} sessionId={} size={}",
+                    roomId, session.getId(), json.length());
+            return true;
+        } catch (IOException e) {
+            log.error("[ASR-SEND-TO-HOST] 发送失败 roomId={}: {}", roomId, e.getMessage());
+            return false;
+        }
     }
 
     // ─── 工具方法 ─────────────────────────────────────────────────────────────
@@ -326,14 +393,24 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     private void relayOutboundJsonAfterHostSent(WebSocketSession session, String json) {
+        long entryNs = System.nanoTime();
         try {
             forwardOutboundJsonToRoom(session, json);
         } catch (Exception e) {
-            log.warn("[WS] 房间转发异常: {}", e.getMessage());
+            log.warn("[WS-FORWARD] 房间转发异常: {}", e.getMessage());
         }
+        long totalNs = System.nanoTime() - entryNs;
+        // 解析 event 类型
+        try {
+            String event = objectMapper.readTree(json).path("event").asText("");
+            if ("transcript".equals(event)) {
+                log.info("[WS-FORWARD] ★ sessionId={} forward完成 totalNs={} event={}", session.getId(), totalNs, event);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void forwardOutboundJsonToRoom(WebSocketSession session, String json) throws IOException {
+        long entryNs = System.nanoTime();
         if (roomWebSocketHandler == null) return;
         String roomId = (String) session.getAttributes().get(JwtHandshakeInterceptor.ATTR_ROOM_ID);
         if (!StringUtils.hasText(roomId)) return;

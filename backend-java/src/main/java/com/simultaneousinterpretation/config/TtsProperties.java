@@ -11,9 +11,9 @@ public class TtsProperties {
   private String apiKey = "";
   private String model = "cosyvoice-v3-flash";
   private String voiceZh = "longanyang";
-  private String voiceEn = "loongabby_v3";
-  private String voiceId = "loongindah_v3";
-  private int sampleRate = 16000;
+  private String voiceEn = "longanhuan";
+  private String voiceId = "longanhuan";
+  private int sampleRate = 24000;
   private double speechRate = 1.0;
   private int timeoutSec = 5;
   private int maxRetry = 2;
