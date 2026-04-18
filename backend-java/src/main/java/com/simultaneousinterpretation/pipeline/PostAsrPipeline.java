@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
 /**
  * ASR final 后的异步流水线：
@@ -24,6 +25,9 @@ import java.util.concurrent.Executors;
  *   <li>立即对源文本做 TTS（不等翻译）</li>
  *   <li>并行翻译到另外两种语言 → 广播 translation 事件 → 各自做 TTS</li>
  * </ol>
+ *
+ * <p>TTS 并发控制：每种语言独立 Semaphore(1)，确保同一时刻每语言只有 1 路 TTS 请求在飞，
+ * 总并发 3 路，匹配 DashScope CosyVoice 3 RPS 限额，防止限流和超时堆积。
  */
 @Component
 public class PostAsrPipeline {
@@ -37,8 +41,22 @@ public class PostAsrPipeline {
     private final ObjectMapper objectMapper;
     private final AsrWebSocketHandler asrWsHandler;
 
-    // 8 线程：最多 3 路 TTS + 2 路翻译并行，留余量
-    private final ExecutorService executor = Executors.newFixedThreadPool(8);
+    /**
+     * 翻译 + TTS 任务共享线程池：翻译并发高，TTS 由 Semaphore 控制，线程数留足余量。
+     * 翻译任务：3 路并行，每路约 3-8s
+     * TTS 任务：3 路并行（每语言 1 路），每路约 2-10s
+     */
+    private final ExecutorService executor = Executors.newFixedThreadPool(12);
+
+    /**
+     * 每种语言独立 Semaphore(1)：同一语言的 TTS 串行执行，三种语言彼此并行。
+     * 保证 DashScope 同时收到的 TTS 请求 ≤ 3，不触发 Throttling.RateQuota。
+     */
+    private final Map<String, Semaphore> ttsSemaphores = Map.of(
+            "zh", new Semaphore(1),
+            "en", new Semaphore(1),
+            "id", new Semaphore(1)
+    );
 
     public PostAsrPipeline(AiTranslateService translateService,
                            RealtimeTtsService ttsService,
@@ -67,12 +85,34 @@ public class PostAsrPipeline {
         if (roomId == null) return;
 
         // ── 1. 源语言 TTS（立即开始，不等翻译） ──────────────────────────────
+        final long srcSubmitMs = System.currentTimeMillis();
         CompletableFuture.runAsync(() -> {
+            long queueWaitMs = System.currentTimeMillis() - srcSubmitMs;
+            log.info("[PIPE-3-TTS-START] segIdx={} lang={} type=source queueWaitMs={}ms wallMs={}",
+                    segIdx, sourceLang, queueWaitMs, System.currentTimeMillis());
+            Semaphore sem = ttsSemaphores.get(sourceLang);
+            long semWaitStart = System.currentTimeMillis();
+            try {
+                sem.acquire();
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                log.warn("[PIPE-3-SEM-INTERRUPTED] segIdx={} lang={}", segIdx, sourceLang);
+                roomWsHandler.broadcastFramedAudioEnd(roomId, segIdx, sourceLang);
+                return;
+            }
+            long semWaitMs = System.currentTimeMillis() - semWaitStart;
+            if (semWaitMs > 10) {
+                log.info("[PIPE-3-SEM-WAIT] segIdx={} lang={} semWaitMs={}ms wallMs={}",
+                        segIdx, sourceLang, semWaitMs, System.currentTimeMillis());
+            }
             try {
                 ttsService.synthesizeAndStream(text, sourceLang, segIdx, roomId, roomWsHandler);
             } catch (Exception e) {
-                log.error("[Pipeline] 源语言TTS失败 lang={} segIdx={}: {}", sourceLang, segIdx, e.getMessage());
+                log.error("[PIPE-3-ERROR] segIdx={} lang={} type=source error={} wallMs={}",
+                        segIdx, sourceLang, e.getMessage(), System.currentTimeMillis());
                 roomWsHandler.broadcastFramedAudioEnd(roomId, segIdx, sourceLang);
+            } finally {
+                sem.release();
             }
         }, executor);
 
@@ -80,8 +120,12 @@ public class PostAsrPipeline {
         for (String targetLang : ALL_LANGS) {
             if (targetLang.equals(sourceLang)) continue;
             final String tgt = targetLang;
+            final long tgtSubmitMs = System.currentTimeMillis();
 
             CompletableFuture.runAsync(() -> {
+                long queueWaitMs = System.currentTimeMillis() - tgtSubmitMs;
+                log.info("[PIPE-3-XLAT-START] segIdx={} src={} tgt={} queueWaitMs={}ms wallMs={}",
+                        segIdx, sourceLang, tgt, queueWaitMs, System.currentTimeMillis());
                 try {
                     TranslateRequest req = new TranslateRequest();
                     req.setSegment(text);
@@ -89,12 +133,19 @@ public class PostAsrPipeline {
                     req.setTargetLang(tgt);
                     req.setKbEnabled(false);
 
+                    long xlStartMs = System.currentTimeMillis();
                     String translated = translateService.translate(req).translation();
+                    long xlDurationMs = System.currentTimeMillis() - xlStartMs;
+
                     if (translated == null || translated.isBlank()) {
-                        log.warn("[Pipeline] 翻译结果为空 src={} tgt={} segIdx={}", sourceLang, tgt, segIdx);
+                        log.warn("[PIPE-3-XLAT-EMPTY] segIdx={} src={} tgt={} durationMs={}ms wallMs={}",
+                                segIdx, sourceLang, tgt, xlDurationMs, System.currentTimeMillis());
                         roomWsHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
                         return;
                     }
+
+                    log.info("[PIPE-3-XLAT-DONE] segIdx={} src={} tgt={} durationMs={}ms textLen={} wallMs={}",
+                            segIdx, sourceLang, tgt, xlDurationMs, translated.length(), System.currentTimeMillis());
 
                     // 广播 translation 事件（主持端 + 所有听众）
                     Map<String, Object> ev = new HashMap<>();
@@ -114,25 +165,34 @@ public class PostAsrPipeline {
                     ev.put("serverTs", System.currentTimeMillis());
 
                     String evJson = objectMapper.writeValueAsString(ev);
-                    log.info("[Pipeline] ★ 翻译完成，准备广播 roomId={} src={} tgt={} segIdx={} text=\"{}\"",
-                            roomId, sourceLang, tgt, segIdx,
-                            text.length() > 50 ? text.substring(0, 50) + "..." : text);
-
-                    // 向主持端发送（主持端连接 ASR WS，通过 room WS 无法到达）
                     asrWsHandler.sendToHost(roomId, evJson);
-                    log.info("[Pipeline] 已通过 ASR WS 发送到主持端 roomId={}", roomId);
-
-                    // 向所有听众广播（听众连接 room WS）
                     roomWsHandler.broadcastJsonToAll(roomId, evJson);
-                    log.info("[Pipeline] 翻译广播完成 src={} tgt={} segIdx={} len={}",
-                            sourceLang, tgt, segIdx, translated.length());
 
-                    // 翻译语言 TTS
-                    ttsService.synthesizeAndStream(translated, tgt, segIdx, roomId, roomWsHandler);
+                    // 获取该语言 TTS 许可（同语言串行，不同语言并行）
+                    Semaphore sem = ttsSemaphores.get(tgt);
+                    long semWaitStart = System.currentTimeMillis();
+                    try {
+                        sem.acquire();
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        log.warn("[PIPE-3-SEM-INTERRUPTED] segIdx={} lang={}", segIdx, tgt);
+                        roomWsHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
+                        return;
+                    }
+                    long semWaitMs = System.currentTimeMillis() - semWaitStart;
+                    if (semWaitMs > 10) {
+                        log.info("[PIPE-3-SEM-WAIT] segIdx={} lang={} semWaitMs={}ms wallMs={}",
+                                segIdx, tgt, semWaitMs, System.currentTimeMillis());
+                    }
+                    try {
+                        ttsService.synthesizeAndStream(translated, tgt, segIdx, roomId, roomWsHandler);
+                    } finally {
+                        sem.release();
+                    }
 
                 } catch (Exception e) {
-                    log.error("[Pipeline] 翻译/TTS失败 src={} tgt={} segIdx={}: {}",
-                            sourceLang, tgt, segIdx, e.getMessage());
+                    log.error("[PIPE-3-ERROR] segIdx={} src={} tgt={} error={} wallMs={}",
+                            segIdx, sourceLang, tgt, e.getMessage(), System.currentTimeMillis());
                     roomWsHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
                 }
             }, executor);

@@ -256,6 +256,11 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
   private void broadcastBinaryToListenersByLang(String roomId, String lang, byte[] frame) {
     Set<WebSocketSession> listeners = listenerSessions.get(roomId);
     if (listeners == null || listeners.isEmpty()) return;
+
+    // 从帧头解析 segIdx 和类型用于日志
+    int segIdx = frame.length >= 4 ? ByteBuffer.wrap(frame).getInt() : -1;
+    String frameType = (frame.length >= 5 && frame[4] == (byte) 0x03) ? "END" : "CHUNK";
+
     ByteBuffer buf = ByteBuffer.wrap(frame);
     int sent = 0;
     for (WebSocketSession s : listeners) {
@@ -266,11 +271,15 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         s.sendMessage(new BinaryMessage(buf.duplicate(), true));
         sent++;
       } catch (IOException e) {
-        log.debug("[房间WS-AUDIO-SEND-FAIL] session={} err={}", s.getId(), e.getMessage());
+        log.debug("[PIPE-5-SEND-FAIL] sessionId={} lang={} segIdx={} error={}", s.getId(), lang, segIdx, e.getMessage());
       }
     }
     if (sent > 0) {
-      log.debug("[房间WS-AUDIO] roomId={} lang={} sent={} frameBytes={}", roomId, lang, sent, frame.length);
+      log.info("[PIPE-5-AUDIO] segIdx={} lang={} type={} sentListeners={} frameBytes={} wallMs={}",
+          segIdx, lang, frameType, sent, frame.length, System.currentTimeMillis());
+    } else {
+      log.debug("[PIPE-5-NO-LISTENERS] segIdx={} lang={} type={} totalListeners={}",
+          segIdx, lang, frameType, listeners.size());
     }
   }
 

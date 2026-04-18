@@ -58,22 +58,7 @@ function batchSourceConcat(parts: Map<number, SourcePart>): string {
     .join(" ");
 }
 
-/** 展示用最大 index（与 TTS、延迟统计对齐） */
-function batchDisplayIndex(parts: Map<number, SourcePart>): number {
-  const s = batchSortedIndices(parts);
-  return s.length ? s[s.length - 1]! : 0;
-}
 type TranslationMap = Map<number, Map<string, string>>;
-/** 播发延时（ms）；na 表示无收听语 TTS（同源/跳过/失败） */
-type ListenLatencyEntry = number | "na";
-
-function formatListenLatency(entry: ListenLatencyEntry | undefined): string | null {
-  if (entry === undefined) return null;
-  if (entry === "na") return "—";
-  if (entry < 1000) return `${entry} ms`;
-  return `${(entry / 1000).toFixed(1)} s`;
-}
-
 /** 当前段在播放时整行高亮（不按字跟读） */
 function SegmentPlayingText({ text, active }: { text: string; active: boolean }) {
   if (!text) return null;
@@ -231,7 +216,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   const [translations, setTranslations] = useState<TranslationMap>(new Map());
   const [listenLang, _setListenLang] = useState<LangCode>("zh");
   const [playingSegIdx, setPlayingSegIdx] = useState(-1);
-  const [listenLatenciesMs, setListenLatenciesMs] = useState<Map<number, ListenLatencyEntry>>(() => new Map());
 
   /** 调参面板展开状态 */
   const [showTuning, setShowTuning] = useState(false);
@@ -240,14 +224,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   /** 调参加载中 */
   const [tuningLoading, setTuningLoading] = useState(false);
 
-  /** 音频静音状态（仅当前页面生效） */
-  const [audioMuted, setAudioMuted] = useState(false);
-  /** 音频静音 ref（避免 AudioContext 在静音状态变化时重新创建） */
-  const audioMutedRef = useRef(false);
-  /** 播放总线 Gain：所有 TTS/回放经此节点，切换静音立即作用于当前正在播的 Buffer */
-  const playbackOutGainRef = useRef<GainNode | null>(null);
-  /** 发言端标识：发言端（自己）不需要听自己的 TTS，播放会导致声学回授。默认 true（发言端）。 */
-  const isSpeakerRef = useRef(true);
   /** 历史记录（按 zh→en→id 顺序） */
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
@@ -256,16 +232,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   const processorRef = useRef<AudioNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // 简化播放状态：缓存音频 + 按 seq 顺序播放
-  const seqCompletedRef = useRef<Set<number>>(new Set());
-  /** 下一个该播放的 seq 序号 */
-  const nextSeqRef = useRef<number>(0);
-  const isPlayingRef = useRef(false);
-  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  /** seq → lang → ArrayBuffer[] */
-  const audioCacheRef = useRef<Map<number, Map<string, ArrayBuffer[]>>>(new Map());
-  /** seq → detectedLang（用于判断播放 PCM 还是 TTS） */
-  const detectedLangMapRef = useRef<Map<number, string>>(new Map());
   const listenLangRef = useRef<LangCode>(listenLang);
   /** 上行 PCM 采样率（与 ready / segment.inputSampleRate 一致） */
   const sentSampleRateRef = useRef(16000);
@@ -312,208 +278,14 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
     }
   }, []);
 
-  /** 确保播放输出节点存在（挂到 ctx.destination 前级） */
-  const connectPlaybackOut = useCallback((ctx: AudioContext) => {
-    const existing = playbackOutGainRef.current;
-    if (existing && existing.context === ctx) return existing;
-    const g = ctx.createGain();
-    g.gain.value = audioMutedRef.current ? 0 : 1;
-    g.connect(ctx.destination);
-    playbackOutGainRef.current = g;
-    return g;
-  }, []);
-
-  /* ── Ordered playback: 从缓存最小 seq 开始，严格递增，seq_completed 驱动跳过 ── */
-  const scheduleNextChunk = useCallback(() => {
-    if (isPlayingRef.current) {
-      console.debug("[AsrPanel-PLAY] isPlaying=true，跳过调度 nextSeq=%d", nextSeqRef.current);
-      return;
-    }
-
-    // 发言端（主持界面）不播放 TTS 音频——只收听实时音频进行翻译，不听翻译结果
-    if (isSpeakerRef.current) {
-      const cachedSeqs = Array.from(audioCacheRef.current.keys()).sort((a, b) => a - b);
-      if (cachedSeqs.length === 0) {
-        console.debug("[AsrPanel-PLAY] isSpeaker=true，缓存为空，跳过");
-        return;
-      }
-      const next = cachedSeqs[0];
-      console.info("[AsrPanel-PLAY] isSpeaker=true，清除seq=%d缓存，继续等待", next);
-      audioCacheRef.current.delete(next);
-      nextSeqRef.current = next + 1;
-      return;
-    }
-
-    const myLang = listenLangRef.current;
-
-    // 找到下一个该播放的 seq
-    let seq = nextSeqRef.current;
-    const cachedSeqs = Array.from(audioCacheRef.current.keys()).sort((a, b) => a - b);
-
-    // [PLAY_LOG] 每次调度入口
-    console.info(
-      "[AsrPanel-PLAY] scheduleNextChunk myLang=%c%s%c seq=%d cachedSeqs=%o completed=%o isPlaying=%s",
-      "color:#f0f;font-weight:bold", myLang, "color:inherit", seq,
-      cachedSeqs, [...seqCompletedRef.current], isPlayingRef.current
-    );
-
-    // 跳过已完成的 seq
-    while (seqCompletedRef.current.has(seq) || !cachedSeqs.includes(seq)) {
-      if (seqCompletedRef.current.has(seq)) {
-        console.info("[AsrPanel-PLAY] seq=%d 命中 seq_completed，跳过", seq);
-        seq++;
-        continue;
-      }
-      if (!cachedSeqs.includes(seq)) {
-        const hasLarger = cachedSeqs.some((s) => s > seq);
-        if (hasLarger) {
-          console.info("[AsrPanel-PLAY] seq=%d 未收到音频但有更大seq=%o，跳过（疑似丢包）", seq, cachedSeqs);
-          seq++;
-          continue;
-        }
-        // [PLAY_LOG] 该 seq 没收到音频，且缓存中最小的就是它，等
-        nextSeqRef.current = seq;
-        console.info("[AsrPanel-PLAY] seq=%d 未收到音频，缓存中最小，继续等待", seq);
-        return;
-      }
-    }
-
-    nextSeqRef.current = seq;
-
-    const segC = audioCacheRef.current.get(seq);
-    if (!segC) {
-      console.info("[AsrPanel-PLAY] seq=%d 缓存为空", seq);
-      return;
-    }
-
-    const langs = Array.from(segC.keys());
-    if (langs.length === 0) {
-      console.info("[AsrPanel-PLAY] seq=%d 缓存中无语言", seq);
-      return;
-    }
-
-    // [PLAY_LOG] 语言选择
-    const targetLang = langs.includes(myLang) ? myLang : langs[0];
-    const isPreferred = targetLang === myLang;
-    console.info(
-      "[AsrPanel-PLAY] seq=%d 语言决策: cachedLangs=%o myLang=%c%s%c isPreferred=%s targetLang=%s",
-      seq, langs,
-      "color:#f0f;font-weight:bold", myLang, "color:inherit",
-      isPreferred, targetLang
-    );
-
-    const bufs = segC.get(targetLang);
-    if (!bufs || bufs.length === 0) {
-      console.info("[AsrPanel-PLAY] seq=%d targetLang=%s 无音频缓冲区", seq, targetLang);
-      return;
-    }
-
-    isPlayingRef.current = true;
-    setPlayingSegIdx(seq);
-
-    const ctx = audioCtxRef.current ?? new AudioContext();
-    audioCtxRef.current = ctx;
-    void ctx.resume().catch(() => {});
-    const out = connectPlaybackOut(ctx);
-
-    console.info("[AsrPanel-PLAY] seq=%d decodeAudioData 开始 lang=%s chunks=%d", seq, targetLang, bufs.length);
-    ctx.decodeAudioData(bufs[0].slice(0))
-      .then((decoded) => {
-        console.info(
-          "[AsrPanel-PLAY] ▶ seq=%d ▶ 播放 audio=▶ lang=%c%s%c chunks=%d dur=%.2fs",
-          seq,
-          isPreferred ? "color:#0f0;font-weight:bold" : "color:#f00;font-weight:bold",
-          targetLang, "color:inherit",
-          bufs.length, decoded.duration
-        );
-        const src = ctx.createBufferSource();
-        src.buffer = decoded;
-        src.connect(out);
-        currentSourceRef.current = src;
-        src.onended = () => {
-          const remaining = segC.get(targetLang);
-          if (remaining && remaining.length > 1) {
-            segC.set(targetLang, remaining.slice(1));
-            currentSourceRef.current = null;
-            isPlayingRef.current = false;
-            console.info("[AsrPanel-PLAY] seq=%d chunk播完，还有%d片余量，继续", seq, remaining.length - 1);
-            if (out.context.state === "running") scheduleNextChunk();
-          } else {
-            segC.delete(targetLang);
-            if (segC.size === 0) audioCacheRef.current.delete(seq);
-            currentSourceRef.current = null;
-            isPlayingRef.current = false;
-            const finishedSeq = seq;
-            nextSeqRef.current = seq + 1;
-            console.info("[AsrPanel-PLAY] seq=%d ▶▶ 播完，清缓存，nextSeq→%d", finishedSeq, seq + 1);
-            if (out.context.state === "running") scheduleNextChunk();
-          }
-        };
-        src.start();
-      })
-      .catch((err) => {
-        console.error("[AsrPanel-PLAY] seq=%d 解码失败:", seq, err);
-        currentSourceRef.current = null;
-        isPlayingRef.current = false;
-        nextSeqRef.current = seq + 1;
-        if (ctx.state === "running") scheduleNextChunk();
-      });
-  }, [connectPlaybackOut]);
-
   /* ── Language switch ── */
   const setListenLang = useCallback((lang: LangCode) => {
-    const prev = listenLangRef.current;
-    console.debug(
-      "[LANG] 切换: %c%s%c → %c%s%c nextSeq=%d cacheSize=%d",
-      "color:#f55", prev, "color:inherit",
-      "color:#5f5;font-weight:bold", lang, "color:inherit",
-      nextSeqRef.current, audioCacheRef.current.size
-    );
     _setListenLang(lang);
     listenLangRef.current = lang;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: "setListenLang", lang }));
     }
-
-    // 停止当前播放，从当前已播放到的 seq 继续（不重置到 0，避免重复）
-    if (currentSourceRef.current) {
-      currentSourceRef.current.onended = null;
-      try { currentSourceRef.current.stop(); } catch { /* ok */ }
-      currentSourceRef.current = null;
-    }
-    isPlayingRef.current = false;
-    setPlayingSegIdx(-1);
-    // nextSeqRef 保持不变，从当前位置继续找新语言音频
-    // 清除旧语言缓存，防止切语言后误播
-    audioCacheRef.current.clear();
-    scheduleNextChunk();
-  }, [scheduleNextChunk]);
-
-  /* ── Cache audio ── */
-  const cacheAudio = useCallback((seq: number, targetLang: string, b64: string) => {
-    try {
-      const bin = atob(b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-
-      let segC = audioCacheRef.current.get(seq);
-      if (!segC) { segC = new Map(); audioCacheRef.current.set(seq, segC); }
-      let arr = segC.get(targetLang);
-      if (!arr) { arr = []; segC.set(targetLang, arr); }
-      arr.push(bytes.buffer);
-
-      console.info(
-        "[AsrPanel-CACHE] seq=%d lang=%c%s%c bytes=%d chunks=%d allLangs=%o nextSeq=%d isPlaying=%s isSpeaker=%s",
-        seq,
-        "color:#ff0;font-weight:bold", targetLang, "color:inherit",
-        bin.length, arr.length, [...segC.keys()],
-        nextSeqRef.current, isPlayingRef.current, isSpeakerRef.current
-      );
-      scheduleNextChunk();
-    } catch (err) {
-      console.error("[AsrPanel-CACHE-ERR] seq=%d lang=%s:", seq, targetLang, err);
-    }
-  }, [scheduleNextChunk]);
+  }, []);
 
   /* ── Cleanup ── */
   const stopInternal = useCallback(() => {
@@ -524,13 +296,9 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
     const shared = audioCtxRef.current;
     audioCtxRef.current = null;
     shared?.close().catch(() => {});
-    playbackOutGainRef.current = null;
-    seqCompletedRef.current.clear();
     capturePipelineStartedAtRef.current = 0;
     lastLoudAudioAtRef.current = 0;
     setCaptureSilentWarn(false);
-    isPlayingRef.current = false;
-    if (currentSourceRef.current) { currentSourceRef.current.onended = null; try { currentSourceRef.current.stop(); } catch { /* ok */ } currentSourceRef.current = null; }
     setRunning(false); setPlayingSegIdx(-1);
   }, []);
 
@@ -540,10 +308,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   const handleEvent = useCallback((ev: AsrServerMessage) => {
     if (ev.event === "ready") {
       setErr(null);
-      // 从缓存最小 seq 开始播放（新加入听众从 currentSeq 继续）
-      if (typeof ev.currentSeq === "number") {
-        nextSeqRef.current = ev.currentSeq;
-      }
       return;
     }
     if (ev.event === "error") {
@@ -583,9 +347,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         segIdx, batchTs, srcCode, ev.detectedLang ?? "?",
         (ev.text ?? "").slice(0, 60));
 
-      detectedLangMapRef.current.set(segIdx, srcCode);
-      // partial 文本不再清空，保持显示 ASR 实时识别进度直到 stop/start
-
       setSegments((p) => {
         const at = p.findIndex((row) => row.segmentBatchTs === batchTs);
         const part: SourcePart = {
@@ -603,13 +364,9 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         }
         const parts = new Map<number, SourcePart>();
         parts.set(segIdx, part);
-        if (nextSeqRef.current === 0) {
-          nextSeqRef.current = segIdx;
-        }
         return [...p, { segmentBatchTs: batchTs, parts }];
       });
       if (ev.detectedLang) setDetectedLang(srcCode);
-      scheduleNextChunk();
 
       // 追加历史记录（zh→en→id 顺序）
       setHistory((prev) => {
@@ -651,30 +408,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         return next;
       });
     }
-    if (ev.event === "tts_skip") {
-      const skipIdx = coerceSegIndex(ev);
-      console.info("[Panel-TTS-SKIP] ★ segIdx=%s lang=%s reason=%s",
-        skipIdx ?? "?", (ev as any).lang ?? (ev as any).targetLang ?? "?",
-        (ev as any).reason ?? "?");
-      // TTS 跳过时触发检查（该语言音频不会被收到，播放逻辑会等其他语言）
-      scheduleNextChunk();
-    }
-    if (ev.event === "audio") {
-      const segIdx = coerceSegIndex(ev);
-      if (segIdx === null) {
-        console.warn("[AsrPanel] audio 事件缺少有效 index", ev);
-        return;
-      }
-      if (!ev.data || ev.data.trim() === "") {
-        console.warn("[AsrPanel-AUDIO-EMPTY] ★ segIdx=%d targetLang=%s data为空，跳过", segIdx, ev.targetLang);
-        return;
-      }
-      const approxBytes = Math.floor(ev.data.length * 0.75);
-      console.info("[AsrPanel-AUDIO] ★ segIdx=%d targetLang=%s srcLang=%s b64Len=%d approxBytes=%d",
-        segIdx, ev.targetLang, ev.sourceLang ?? "?", ev.data.length, approxBytes);
-      cacheAudio(segIdx, ev.targetLang, ev.data);
-    }
-  }, [cacheAudio, scheduleNextChunk]);
+  }, []);
 
   /* ── Auto-scroll（合并行用 data-merged-indices 命中子段号） ── */
   useEffect(() => {
@@ -726,12 +460,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   const start = async () => {
     setErr(null); setPartial(""); partialRef.current = ""; setLiveTranscript(""); setSegments([]); setTranslations(new Map()); setDetectedLang("");
     setPlayingSegIdx(-1);
-    setListenLatenciesMs(new Map());
-    detectedLangMapRef.current.clear();
     micCumSentRef.current = 0;
-    audioCacheRef.current.clear();
-    seqCompletedRef.current.clear();
-    nextSeqRef.current = 0;
 
     /**
      * 收听端音频采集方案：通过 getDisplayMedia 让用户手动选择要捕获的标签页/窗口音频。
@@ -1083,12 +812,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
             {segments.map((seg) => {
               const merged = batchSortedIndices(seg.parts);
               const rowActive = merged.includes(playingSegIdx);
-              const dispIdx = batchDisplayIndex(seg.parts);
-              const listenEntry = listenLatenciesMs.get(dispIdx);
-              const latencyLabel = listenEntry !== undefined
-                ? (listenEntry === "na" ? "—" : formatListenLatency(listenEntry) ?? "—")
-                : "延迟 …";
-              const latencyTitle = "延迟：PCM采集 → 翻译 → TTS → 音频下发";
               return (
                 <div
                   key={merged.join("-")}
@@ -1096,13 +819,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
                   data-merged-indices={merged.join(",")}
                   className={`si-tri-block ${rowActive ? "si-tri-block--playing" : ""}`}
                 >
-                  <div
-                    className={`si-tri-block-latency ${listenEntry === undefined ? "si-tri-block-latency--wait" : ""}`}
-                    title={latencyTitle}
-                  >
-                    <IconLatencyHeadset />
-                    <span>{latencyLabel}</span>
-                  </div>
                   {(["zh", "en", "id"] as LangCode[]).map((lang) => {
                     const { text, allPending, tailPending } = getSegTextByLang(seg, lang);
                     return (
@@ -1188,32 +904,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         {!running
           ? <button type="button" className="si-tri-btn" onClick={() => void start()}>开始收音</button>
           : <button type="button" className="si-tri-btn si-tri-btn--stop" onClick={stop}>停止</button>}
-        <button
-          type="button"
-          className={`si-tri-audio-btn ${audioMuted ? "si-tri-audio-btn--muted" : ""}`}
-          onClick={() => {
-            const next = !audioMuted;
-            setAudioMuted(next);
-            audioMutedRef.current = next;
-            const g = playbackOutGainRef.current;
-            if (g) g.gain.value = next ? 0 : 1;
-          }}
-          title={audioMuted ? "取消静音" : "静音"}
-        >
-          {audioMuted ? (
-            /* 静音图标 */
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M11 5L6 9H3v6h3l5 4V5zm7.5 7a4.5 4.5 0 01-2.5-4v8a4.5 4.5 0 002.5-4z" fill="currentColor"/>
-              <line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          ) : (
-            /* 有声音图标 */
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M11 5L6 9H3v6h3l5 4V5zm7.5 7a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4z" fill="currentColor"/>
-              <path d="M15.5 10a3 3 0 010 4M19 7a7 7 0 010 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          )}
-        </button>
       </div>
 
       {/* 历史记录折叠区 */}

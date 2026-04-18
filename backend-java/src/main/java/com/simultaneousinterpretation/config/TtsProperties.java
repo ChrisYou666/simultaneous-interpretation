@@ -15,7 +15,7 @@ public class TtsProperties {
   private String voiceId = "longanhuan";
   private int sampleRate = 24000;
   private double speechRate = 1.0;
-  private int timeoutSec = 5;
+  private int timeoutSec = 23;
   private int maxRetry = 2;
   private int maxConcurrent = 8;
 

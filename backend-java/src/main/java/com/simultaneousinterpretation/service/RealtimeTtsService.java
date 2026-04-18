@@ -60,17 +60,20 @@ public class RealtimeTtsService {
 
         String voice = ttsProperties.getVoice(lang);
         String model = ttsProperties.getModel();
-        log.info("[TTS] 开始合成 lang={} voice={} model={} segIdx={} textLen={}",
-                lang, voice, model, segIdx, text.length());
-
         long startMs = System.currentTimeMillis();
         int[] chunkCount = {0};
 
+        log.info("[PIPE-4-START] segIdx={} lang={} textLen={} model={} voice={} wallMs={}",
+                segIdx, lang, text.length(), model, voice, startMs);
+
+        long timeoutMs = ttsProperties.getTimeoutSec() * 1000L;
         SpeechSynthesisParam param = SpeechSynthesisParam.builder()
                 .model(model)
                 .voice(voice)
-                .format(SpeechSynthesisAudioFormat.WAV_16000HZ_MONO_16BIT)
+                .format(SpeechSynthesisAudioFormat.PCM_16000HZ_MONO_16BIT)
                 .apiKey(apiKey)
+                .firstPackageTimeout(timeoutMs)
+                .connectionTimeout(timeoutMs)
                 .build();
 
         SpeechSynthesizer synthesizer = new SpeechSynthesizer(param,
@@ -82,24 +85,35 @@ public class RealtimeTtsService {
                         byte[] bytes = new byte[audio.remaining()];
                         audio.get(bytes);
                         chunkCount[0]++;
+                        if (chunkCount[0] == 1) {
+                            long firstFrameMs = System.currentTimeMillis() - startMs;
+                            log.info("[PIPE-4-FIRST-FRAME] segIdx={} lang={} firstFrameMs={}ms chunkBytes={} wallMs={}",
+                                    segIdx, lang, firstFrameMs, bytes.length, System.currentTimeMillis());
+                        } else {
+                            log.debug("[PIPE-4-CHUNK] segIdx={} lang={} chunkIdx={} chunkBytes={}",
+                                    segIdx, lang, chunkCount[0], bytes.length);
+                        }
                         roomWsHandler.broadcastFramedAudioChunk(roomId, segIdx, lang, bytes);
                     }
 
                     @Override
                     public void onComplete() {
-                        long elapsed = System.currentTimeMillis() - startMs;
-                        log.info("[TTS] 合成完成 lang={} segIdx={} chunks={} elapsed={}ms",
-                                lang, segIdx, chunkCount[0], elapsed);
+                        long totalMs = System.currentTimeMillis() - startMs;
+                        log.info("[PIPE-4-DONE] segIdx={} lang={} chunks={} totalMs={}ms wallMs={}",
+                                segIdx, lang, chunkCount[0], totalMs, System.currentTimeMillis());
                         roomWsHandler.broadcastFramedAudioEnd(roomId, segIdx, lang);
                     }
 
                     @Override
                     public void onError(Exception e) {
-                        log.error("[TTS] 合成失败 lang={} segIdx={}: {}", lang, segIdx, e.getMessage());
+                        long durationMs = System.currentTimeMillis() - startMs;
+                        log.error("[PIPE-4-ERROR] segIdx={} lang={} durationMs={}ms chunks={} error={} wallMs={}",
+                                segIdx, lang, durationMs, chunkCount[0], e.getMessage(), System.currentTimeMillis());
                         roomWsHandler.broadcastFramedAudioEnd(roomId, segIdx, lang);
                     }
                 });
 
         synthesizer.streamingCall(text);
+        synthesizer.streamingComplete(ttsProperties.getTimeoutSec() * 1000L + 10_000L);
     }
 }

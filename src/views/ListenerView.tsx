@@ -94,12 +94,10 @@ export function ListenerView() {
   const handleEventRef = useRef<(ev: AsrServerMessage) => void>(() => {});
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  /** segIdx → 待合并的 WAV 块列表 */
-  const wavChunksRef = useRef<Map<number, Uint8Array[]>>(new Map());
-  /** 音频播放队列（已解码 AudioBuffer） */
-  const audioQueueRef = useRef<{ buf: AudioBuffer; segIdx: number }[]>([]);
-  const isPlayingRef = useRef(false);
-  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  /** AudioContext 全局播放时间轴（下一个 chunk 的调度时刻） */
+  const nextScheduleRef = useRef<number>(0);
+  /** 已调度过首帧的 segIdx 集合（用于 playingSegIdx 时序更新） */
+  const segFirstChunkRef = useRef<Set<number>>(new Set());
 
   // ── AudioContext 懒初始化（用户手势后创建） ──────────────────────────────
   const getAudioCtx = useCallback((): AudioContext => {
@@ -115,58 +113,52 @@ export function ListenerView() {
     return ctx;
   }, []);
 
-  // ── 顺序播放队列 ─────────────────────────────────────────────────────────
-  const playNextRef = useRef<() => void>(() => {});
-  const playNext = useCallback(() => {
-    if (isPlayingRef.current) return;
-    const item = audioQueueRef.current.shift();
-    if (!item) { setPlayingSegIdx(-1); return; }
-    isPlayingRef.current = true;
-    setPlayingSegIdx(item.segIdx);
-    const ctx = getAudioCtx();
-    void ctx.resume();
-    const src = ctx.createBufferSource();
-    src.buffer = item.buf;
-    src.connect(masterGainRef.current ?? ctx.destination);
-    currentSourceRef.current = src;
-    src.onended = () => {
-      currentSourceRef.current = null;
-      isPlayingRef.current = false;
-      playNextRef.current();
-    };
-    src.start();
-  }, [getAudioCtx]);
-  playNextRef.current = playNext;
-
-  // ── 二进制帧处理 ─────────────────────────────────────────────────────────
+  // ── PCM 流式调度 ─────────────────────────────────────────────────────────
   const handleBinaryFrame = useCallback((buffer: ArrayBuffer) => {
     const frame = parseAudioFrame(buffer);
     if (!frame || frame.lang !== listenLangRef.current) return;
 
-    if (frame.type === 0x01) {
-      // WAV chunk：追加到待合并列表
-      const chunks = wavChunksRef.current.get(frame.segIdx) ?? [];
-      chunks.push(frame.data);
-      wavChunksRef.current.set(frame.segIdx, chunks);
-    } else if (frame.type === 0x03) {
-      // END：合并所有 chunk → 解码 → 入队播放
-      const chunks = wavChunksRef.current.get(frame.segIdx) ?? [];
-      wavChunksRef.current.delete(frame.segIdx);
-      if (chunks.length === 0) return;
-
-      const total = chunks.reduce((a, b) => a + b.length, 0);
-      const merged = new Uint8Array(total);
-      let off = 0;
-      for (const c of chunks) { merged.set(c, off); off += c.length; }
-
-      const segIdx = frame.segIdx;
+    if (frame.type === 0x01 && frame.data.byteLength > 0) {
+      // PCM 16-bit LE → Float32 → AudioBuffer → 立即调度
       const ctx = getAudioCtx();
-      ctx.decodeAudioData(merged.buffer.slice(merged.byteOffset, merged.byteOffset + merged.byteLength))
-        .then((decoded) => {
-          audioQueueRef.current.push({ buf: decoded, segIdx });
-          playNextRef.current();
-        })
-        .catch((e) => console.warn("[Audio] decode failed segIdx=%d:", segIdx, e));
+      void ctx.resume();
+
+      const samples = frame.data.byteLength >> 1;
+      const pcm = new DataView(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
+      const float = new Float32Array(samples);
+      for (let i = 0; i < samples; i++) float[i] = pcm.getInt16(i * 2, true) / 32768;
+
+      const audioBuf = ctx.createBuffer(1, samples, 16000);
+      audioBuf.copyToChannel(float, 0);
+
+      // 追加到全局时间轴末尾；若时间轴落后于当前时刻，从 currentTime + 50ms 重新开始
+      const startTime = Math.max(nextScheduleRef.current, ctx.currentTime + 0.05);
+      nextScheduleRef.current = startTime + audioBuf.duration;
+
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuf;
+      src.connect(masterGainRef.current ?? ctx.destination);
+      src.start(startTime);
+
+      // 首帧：用 setTimeout 在音频实际播放时更新 playingSegIdx
+      const segIdx = frame.segIdx;
+      if (!segFirstChunkRef.current.has(segIdx)) {
+        segFirstChunkRef.current.add(segIdx);
+        const delayMs = Math.max(0, (startTime - ctx.currentTime) * 1000);
+        setTimeout(() => setPlayingSegIdx(segIdx), delayMs);
+      }
+
+    } else if (frame.type === 0x03) {
+      // END：在该段最后一帧播完时清除 playingSegIdx
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const segIdx = frame.segIdx;
+      const endTime = nextScheduleRef.current;
+      const delayMs = Math.max(0, (endTime - ctx.currentTime) * 1000);
+      setTimeout(() => {
+        segFirstChunkRef.current.delete(segIdx);
+        setPlayingSegIdx((prev) => (prev === segIdx ? -1 : prev));
+      }, delayMs);
     }
   }, [getAudioCtx]);
 
@@ -298,14 +290,9 @@ export function ListenerView() {
     setConnected(false);
     setErr(null);
 
-    wavChunksRef.current.clear();
-    audioQueueRef.current = [];
-    isPlayingRef.current = false;
-    if (currentSourceRef.current) {
-      currentSourceRef.current.onended = null;
-      try { currentSourceRef.current.stop(); } catch { /* ok */ }
-      currentSourceRef.current = null;
-    }
+    nextScheduleRef.current = 0;
+    segFirstChunkRef.current.clear();
+    setPlayingSegIdx(-1);
 
     // 用户手势里创建 AudioContext，解除浏览器自动播放限制
     try {
@@ -356,15 +343,10 @@ export function ListenerView() {
   const setListenLangHandler = useCallback((lang: LangCode) => {
     setListenLang(lang);
     listenLangRef.current = lang;
-    // 清空当前语言的音频缓冲
-    wavChunksRef.current.clear();
-    audioQueueRef.current = [];
-    if (currentSourceRef.current) {
-      currentSourceRef.current.onended = null;
-      try { currentSourceRef.current.stop(); } catch { /* ok */ }
-      currentSourceRef.current = null;
-    }
-    isPlayingRef.current = false;
+    // 重置 PCM 时间轴，旧语言的已调度 chunk 最多还有 ~0.25s 会自然结束
+    nextScheduleRef.current = 0;
+    segFirstChunkRef.current.clear();
+    setPlayingSegIdx(-1);
   }, []);
 
   // ── 卸载时关闭 WS ────────────────────────────────────────────────────────

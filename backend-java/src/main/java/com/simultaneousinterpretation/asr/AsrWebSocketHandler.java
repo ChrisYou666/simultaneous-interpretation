@@ -146,8 +146,6 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     // ─── SDK 回调 ─────────────────────────────────────────────────────────────
 
     private void handleSdkResult(WebSocketSession session, TranslationRecognizerResult result) {
-        long handlerEntryNs = System.nanoTime();
-        long handlerEntryMs = System.currentTimeMillis();
         String sessionId = session.getId();
         int floor  = (Integer) session.getAttributes().getOrDefault(JwtHandshakeInterceptor.ATTR_FLOOR, 1);
         String roomId = (String) session.getAttributes().get(JwtHandshakeInterceptor.ATTR_ROOM_ID);
@@ -159,19 +157,10 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         if (!StringUtils.hasText(text)) return;
 
         boolean isFinal = result.isSentenceEnd();
-        long resultsCount = ((AtomicLong) session.getAttributes()
-                .computeIfAbsent("asr.resultsReceived", k -> new AtomicLong(0))).incrementAndGet();
-
-        log.info("[SDK-RESULT] ★★★ sessionId={} #{} isFinal={} text=\"{}\" textLen={} entryMs={}",
-                sessionId, resultsCount, isFinal, truncate(text, 60), text.length(), handlerEntryMs);
 
         // ── 始终广播 transcript（partial 或 final）给主持端 + 听众端 ──────────
-        // partial 不做语言检测，复用上一次 final 检测结果（或默认 zh）
-        long beforeLangNs = System.nanoTime();
         String cachedLang = (String) session.getAttributes().getOrDefault(ATTR_CURRENT_SRC_LANG, "zh");
-        long langGetNs = System.nanoTime() - beforeLangNs;
 
-        long beforeBuildNs = System.nanoTime();
         Map<String, Object> transcriptPayload = new HashMap<>();
         transcriptPayload.put("event", "transcript");
         transcriptPayload.put("partial", !isFinal);
@@ -179,78 +168,68 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         transcriptPayload.put("language", cachedLang);
         transcriptPayload.put("confidence", 1.0);
         transcriptPayload.put("floor", floor);
-        long buildPayloadNs = System.nanoTime() - beforeBuildNs;
 
-        long beforeSendNs = System.nanoTime();
         try {
             sendPayload(session, transcriptPayload);
         } catch (IOException e) {
-            log.error("[SDK-RESULT] sessionId={} 发送 transcript 失败", sessionId, e);
+            log.error("[ASR] sessionId={} 发送 transcript 失败", sessionId, e);
             return;
         }
-        long sendPayloadNs = System.nanoTime() - beforeSendNs;
-        long totalHandlerNs = System.nanoTime() - handlerEntryNs;
 
-        log.info("[SDK-RESULT-TRANSCRIPT] ★★★ sessionId={} 发送完成: " +
-                "langGetNs={} buildNs={} sendNs={} totalNs={} " +
-                "cachedLang={} isFinal={} textLen={}",
-                sessionId, langGetNs, buildPayloadNs, sendPayloadNs, totalHandlerNs,
-                cachedLang, isFinal, text.length());
+        if (!isFinal) return;
 
         // ── Final：语言检测 → 注册段 → 广播 segment 事件 → 触发翻译+TTS ──────
-        if (isFinal) {
-            long beforeLangDetectNs = System.nanoTime();
-            String detectedLang = languageDetectionService.detect(text);
-            if (detectedLang == null || detectedLang.isBlank()) detectedLang = "zh";
-            long langDetectNs = System.nanoTime() - beforeLangDetectNs;
+        long langDetectStartNs = System.nanoTime();
+        String detectedLang = languageDetectionService.detect(text);
+        if (detectedLang == null || detectedLang.isBlank()) detectedLang = "zh";
+        long langDetectMs = (System.nanoTime() - langDetectStartNs) / 1_000_000;
 
-            long serverTs = System.currentTimeMillis();
-            session.getAttributes().put(ATTR_CURRENT_SRC_LANG, detectedLang);
+        long serverTs = System.currentTimeMillis();
+        session.getAttributes().put(ATTR_CURRENT_SRC_LANG, detectedLang);
 
-            int segIdx = -1;
-            if (roomId != null) {
-                RoomSegmentRegistry.RoomRegistry reg = segmentRegistry.getOrCreate(roomId);
-                RoomSegmentRegistry.SegmentRecord rec =
-                        reg.registerSegment(text, detectedLang, 1.0, floor, serverTs, serverTs);
-                segIdx = rec.getSegIndex();
-            }
+        int segIdx = -1;
+        if (roomId != null) {
+            RoomSegmentRegistry.RoomRegistry reg = segmentRegistry.getOrCreate(roomId);
+            RoomSegmentRegistry.SegmentRecord rec =
+                    reg.registerSegment(text, detectedLang, 1.0, floor, serverTs, serverTs);
+            segIdx = rec.getSegIndex();
+        }
 
-            ((AtomicLong) session.getAttributes()
-                    .computeIfAbsent("asr.segmentsEmitted", k -> new AtomicLong(0))).incrementAndGet();
+        ((AtomicLong) session.getAttributes()
+                .computeIfAbsent("asr.segmentsEmitted", k -> new AtomicLong(0))).incrementAndGet();
 
-            Map<String, Object> segPayload = new HashMap<>();
-            segPayload.put("event", "segment");
-            segPayload.put("index", segIdx);
-            segPayload.put("sequence", segIdx);
-            segPayload.put("text", text);
-            segPayload.put("sourceLang", detectedLang);
-            segPayload.put("lang", detectedLang);
-            segPayload.put("detectedLang", detectedLang);
-            segPayload.put("textRole", "source");
-            segPayload.put("isSourceText", true);
-            segPayload.put("confidence", 1.0);
-            segPayload.put("floor", floor);
-            segPayload.put("serverTs", serverTs);
-            segPayload.put("segmentTs", serverTs);
-            segPayload.put("inputSampleRate", asrProperties.getDashscope().getSampleRate());
+        Map<String, Object> segPayload = new HashMap<>();
+        segPayload.put("event", "segment");
+        segPayload.put("index", segIdx);
+        segPayload.put("sequence", segIdx);
+        segPayload.put("text", text);
+        segPayload.put("sourceLang", detectedLang);
+        segPayload.put("lang", detectedLang);
+        segPayload.put("detectedLang", detectedLang);
+        segPayload.put("textRole", "source");
+        segPayload.put("isSourceText", true);
+        segPayload.put("confidence", 1.0);
+        segPayload.put("floor", floor);
+        segPayload.put("serverTs", serverTs);
+        segPayload.put("segmentTs", serverTs);
+        segPayload.put("inputSampleRate", asrProperties.getDashscope().getSampleRate());
 
-            long beforeSegSendNs = System.nanoTime();
-            try {
-                sendPayload(session, segPayload);
-            } catch (IOException e) {
-                log.debug("[SDK-RESULT] sessionId={} 发送 segment 失败", sessionId, e);
-            }
-            long segSendNs = System.nanoTime() - beforeSegSendNs;
+        try {
+            sendPayload(session, segPayload);
+        } catch (IOException e) {
+            log.debug("[ASR] sessionId={} 发送 segment 失败", sessionId, e);
+        }
 
-            log.info("[SEG-EMIT] ★★★ sessionId={} segIdx={} lang={} " +
-                    "langDetectNs={} segSendNs={} text=\"{}\"",
-                    sessionId, segIdx, detectedLang, langDetectNs, segSendNs, truncate(text, 50));
+        // [PIPE-1] ASR final 文本已就绪，准备触发流水线
+        log.info("[PIPE-1] segIdx={} lang={} textLen={} langDetectMs={}ms text=\"{}\" wallMs={}",
+                segIdx, detectedLang, text.length(), langDetectMs, truncate(text, 40), serverTs);
 
-            if (roomId != null && segIdx >= 0) {
-                final String finalLang = detectedLang;
-                final int finalSegIdx = segIdx;
-                postAsrPipeline.triggerAsync(text, finalLang, finalSegIdx, serverTs, roomId, floor);
-            }
+        if (roomId != null && segIdx >= 0) {
+            final String finalLang = detectedLang;
+            final int finalSegIdx = segIdx;
+            log.info("[PIPE-2] segIdx={} sourceLang={} roomId={} wallMs={}",
+                    finalSegIdx, finalLang, roomId, System.currentTimeMillis());
+            postAsrPipeline.triggerAsync(text, finalLang, finalSegIdx, serverTs, roomId, floor);
         }
     }
 
