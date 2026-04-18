@@ -225,24 +225,44 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
   /**
    * 广播带帧头的二进制音频块（WAV chunk）给订阅特定语言的听众。
    *
-   * <p>帧格式：[4B segIdx big-endian][1B type=0x01][1B langLen][langLen bytes lang][audio bytes]
+   * <p>帧格式：[4B segIdx big-endian][4B sentenceIdx big-endian][1B type=0x01][1B langLen][langLen bytes lang][audio bytes]
    */
-  public void broadcastFramedAudioChunk(String roomId, int segIdx, String lang, byte[] audioData) {
-    byte[] frame = buildAudioFrame(segIdx, (byte) 0x01, lang, audioData);
+  public void broadcastFramedAudioChunk(String roomId, int segIdx, int sentenceIdx, String lang, byte[] audioData) {
+    byte[] frame = buildAudioFrame(segIdx, sentenceIdx, (byte) 0x01, lang, audioData);
     broadcastBinaryToListenersByLang(roomId, lang, frame);
   }
 
   /**
    * 广播带帧头的音频结束标记（END）给订阅特定语言的听众。
    *
-   * <p>帧格式：[4B segIdx big-endian][1B type=0x03][1B langLen][langLen bytes lang]（无音频数据）
+   * <p>帧格式：[4B segIdx big-endian][4B sentenceIdx big-endian][1B type=0x03][1B langLen][langLen bytes lang]（无音频数据）
    */
-  public void broadcastFramedAudioEnd(String roomId, int segIdx, String lang) {
-    byte[] frame = buildAudioFrame(segIdx, (byte) 0x03, lang, new byte[0]);
+  public void broadcastFramedAudioEnd(String roomId, int segIdx, int sentenceIdx, String lang) {
+    byte[] frame = buildAudioFrame(segIdx, sentenceIdx, (byte) 0x03, lang, new byte[0]);
     broadcastBinaryToListenersByLang(roomId, lang, frame);
   }
 
-  private byte[] buildAudioFrame(int segIdx, byte type, String lang, byte[] audioData) {
+  /**
+   * 兼容旧格式的 END 广播（用于源语链，单句无 sentenceIdx）
+   */
+  public void broadcastFramedAudioEnd(String roomId, int segIdx, String lang) {
+    byte[] frame = buildAudioFrameLegacy(segIdx, (byte) 0x03, lang, new byte[0]);
+    broadcastBinaryToListenersByLang(roomId, lang, frame);
+  }
+
+  private byte[] buildAudioFrame(int segIdx, int sentenceIdx, byte type, String lang, byte[] audioData) {
+    byte[] langBytes = lang.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    ByteBuffer buf = ByteBuffer.allocate(4 + 4 + 1 + 1 + langBytes.length + audioData.length);
+    buf.putInt(segIdx);
+    buf.putInt(sentenceIdx);
+    buf.put(type);
+    buf.put((byte) langBytes.length);
+    buf.put(langBytes);
+    if (audioData.length > 0) buf.put(audioData);
+    return buf.array();
+  }
+
+  private byte[] buildAudioFrameLegacy(int segIdx, byte type, String lang, byte[] audioData) {
     byte[] langBytes = lang.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     ByteBuffer buf = ByteBuffer.allocate(4 + 1 + 1 + langBytes.length + audioData.length);
     buf.putInt(segIdx);
@@ -258,28 +278,52 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     if (listeners == null || listeners.isEmpty()) return;
 
     // 从帧头解析 segIdx 和类型用于日志
-    int segIdx = frame.length >= 4 ? ByteBuffer.wrap(frame).getInt() : -1;
-    String frameType = (frame.length >= 5 && frame[4] == (byte) 0x03) ? "END" : "CHUNK";
-
     ByteBuffer buf = ByteBuffer.wrap(frame);
+    int segIdx = -1;
+    int sentenceIdx = -1;
+    String frameType = "UNKNOWN";
+    try {
+      segIdx = buf.getInt();
+      // 检查帧格式：legacy (4+1+1+lang) vs new (4+4+1+1+lang)
+      if (frame.length >= 9 && buf.remaining() > 0) {
+        // 可能是新格式：尝试读取 sentenceIdx
+        int savedPos = buf.position();
+        int maybeSentenceIdx = buf.getInt();
+        if (buf.remaining() > 0) {
+          byte type = buf.get();
+          sentenceIdx = maybeSentenceIdx;
+          frameType = (type == (byte) 0x03) ? "END" : "CHUNK";
+        } else {
+          // legacy 格式，回退
+          buf.position(savedPos);
+          frameType = (frame.length >= 5 && frame[4] == (byte) 0x03) ? "END" : "CHUNK";
+        }
+      } else {
+        frameType = (frame.length >= 5 && frame[4] == (byte) 0x03) ? "END" : "CHUNK";
+      }
+    } catch (Exception e) {
+      log.debug("[PIPE-5] 帧头解析异常 frameLen={}", frame.length, e);
+    }
+
+    ByteBuffer sendBuf = ByteBuffer.wrap(frame);
     int sent = 0;
     for (WebSocketSession s : listeners) {
       if (!s.isOpen()) continue;
       SessionInfo info = sessionInfoMap.get(s.getId());
       if (info == null || !lang.equals(info.listenLang)) continue;
       try {
-        s.sendMessage(new BinaryMessage(buf.duplicate(), true));
+        s.sendMessage(new BinaryMessage(sendBuf.duplicate(), true));
         sent++;
       } catch (IOException e) {
-        log.debug("[PIPE-5-SEND-FAIL] sessionId={} lang={} segIdx={} error={}", s.getId(), lang, segIdx, e.getMessage());
+        log.debug("[PIPE-5-SEND-FAIL] sessionId={} lang={} segIdx={} sentIdx={} error={}", s.getId(), lang, segIdx, sentenceIdx, e.getMessage());
       }
     }
     if (sent > 0) {
-      log.info("[PIPE-5-AUDIO] segIdx={} lang={} type={} sentListeners={} frameBytes={} wallMs={}",
-          segIdx, lang, frameType, sent, frame.length, System.currentTimeMillis());
+      log.info("[PIPE-5-AUDIO] segIdx={} sentIdx={} lang={} type={} sentListeners={} frameBytes={} wallMs={}",
+          segIdx, sentenceIdx, lang, frameType, sent, frame.length, System.currentTimeMillis());
     } else {
-      log.debug("[PIPE-5-NO-LISTENERS] segIdx={} lang={} type={} totalListeners={}",
-          segIdx, lang, frameType, listeners.size());
+      log.debug("[PIPE-5-NO-LISTENERS] segIdx={} sentIdx={} lang={} type={} totalListeners={}",
+          segIdx, sentenceIdx, lang, frameType, listeners.size());
     }
   }
 

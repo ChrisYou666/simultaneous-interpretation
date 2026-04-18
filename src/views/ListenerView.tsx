@@ -55,22 +55,24 @@ type SegmentCard = {
   transByLang: Map<string, Map<number, string>>;
 };
 
-// ── 二进制帧格式：[4B segIdx][1B type][1B langLen][N lang][audio bytes] ────────
+// ── 二进制帧格式：[4B segIdx][4B sentenceIdx][1B type][1B langLen][N lang][audio bytes] ──
 function parseAudioFrame(buffer: ArrayBuffer): {
   segIdx: number;
+  sentenceIdx: number;
   type: number;
   lang: string;
   data: Uint8Array;
 } | null {
-  if (buffer.byteLength < 6) return null;
+  if (buffer.byteLength < 10) return null;
   const dv = new DataView(buffer);
   const segIdx = dv.getInt32(0, false);
-  const type = dv.getUint8(4);
-  const langLen = dv.getUint8(5);
-  if (buffer.byteLength < 6 + langLen) return null;
-  const lang = new TextDecoder().decode(new Uint8Array(buffer, 6, langLen));
-  const data = new Uint8Array(buffer, 6 + langLen);
-  return { segIdx, type, lang, data: new Uint8Array(data) };
+  const sentenceIdx = dv.getInt32(4, false);
+  const type = dv.getUint8(8);
+  const langLen = dv.getUint8(9);
+  if (buffer.byteLength < 10 + langLen) return null;
+  const lang = new TextDecoder().decode(new Uint8Array(buffer, 10, langLen));
+  const data = new Uint8Array(buffer, 10 + langLen);
+  return { segIdx, sentenceIdx, type, lang, data };
 }
 
 export function ListenerView() {

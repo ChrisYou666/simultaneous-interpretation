@@ -88,15 +88,43 @@ final class AsrClientTextOutboundQueue {
         } catch (Exception ignored) {}
 
         long beforeSendNs = System.nanoTime();
+        IOException lastError = null;
+        boolean sent = false;
         synchronized (session) {
           if (!session.isOpen()) {
             log.warn("[LAT-SEND] sessionId={} session已关闭，跳过发送 event={}", sessionId, eventType);
             continue;
           }
-          session.sendMessage(new TextMessage(msg));
+          // 重试发送，处理 BINARY_PARTIAL_WRITING 等临时错误
+          for (int retry = 0; retry < 3; retry++) {
+            try {
+              session.sendMessage(new TextMessage(msg));
+              sent = true;
+              break;
+            } catch (IOException e) {
+              lastError = e;
+              String errMsg = e.getMessage();
+              if (errMsg != null && errMsg.contains("BINARY_PARTIAL_WRITING")) {
+                log.warn("[LAT-SEND-RETRY] sessionId={} retry={} 等待BINARY_PARTIAL_WRITING恢复", sessionId, retry);
+                try {
+                  Thread.sleep(20);
+                } catch (InterruptedException ie) {
+                  Thread.currentThread().interrupt();
+                  break;
+                }
+              } else {
+                break;
+              }
+            }
+          }
         }
         long afterSendNs = System.nanoTime();
         long sendNs = afterSendNs - beforeSendNs;
+
+        if (!sent) {
+          log.warn("[LAT-SEND-FAIL] sessionId={} event={} segIdx={} 发送失败: {}",
+              sessionId, eventType, segIdx, lastError != null ? lastError.getMessage() : "unknown");
+        }
 
         long hostSendWallMs = System.currentTimeMillis();
 
