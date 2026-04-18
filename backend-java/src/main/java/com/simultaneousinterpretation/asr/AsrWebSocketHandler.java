@@ -41,6 +41,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * ASR WebSocket 处理器
@@ -79,7 +80,19 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     private final TtsProperties ttsProperties;
     private final DashScopeProperties dashScopeProperties;
 
-    /** 翻译线程池 */
+    /**
+     * 每种语言独立的单线程执行器。
+     *
+     * <p>关键设计：同一语言的 TTS 任务天然串行执行，杜绝两段音频帧交错发送
+     * （即"两个声音同时播放"问题的根因）。不同语言之间保持并发。
+     */
+    private final Map<String, ExecutorService> langExecutors = Map.of(
+            "zh", Executors.newSingleThreadExecutor(r -> new Thread(r, "tts-zh")),
+            "en", Executors.newSingleThreadExecutor(r -> new Thread(r, "tts-en")),
+            "id", Executors.newSingleThreadExecutor(r -> new Thread(r, "tts-id"))
+    );
+
+    /** 翻译专用线程池（不含 TTS，用于并行调翻译 API） */
     private final ExecutorService translateExecutor = Executors.newFixedThreadPool(6);
 
     /** roomId -> 主持端 ASR WebSocket session（用于向主持端发送翻译事件） */
@@ -259,12 +272,16 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     /**
-     * 触发翻译和 TTS（连接池 + streamingCallAsFlowable 流式发送）
+     * 触发翻译和 TTS（连接池 + streamingCallAsFlowable 流式发送）。
+     *
+     * <p>每种语言的 TTS 任务提交到该语言专属的单线程执行器 {@link #langExecutors}，
+     * 保证同一语言的音频帧永远串行发送，彻底消除"两段音频同时播放"问题。
      */
     private void triggerTranslationAndTts(String text, String sourceLang, int segIdx,
                                           long segmentTs, String roomId, int floor) {
-        // ── 源语链：直接 TTS ──────────────────────────────────────────────
-        CompletableFuture.runAsync(() -> {
+        // ── 源语链：直接 TTS（提交到源语的专属执行器） ────────────────────
+        ExecutorService srcExec = langExecutors.getOrDefault(sourceLang, translateExecutor);
+        srcExec.submit(() -> {
             TtsConnectionPool.Lang poolLang = toPoolLang(sourceLang);
             SpeechSynthesizer synthesizer = null;
             try {
@@ -276,48 +293,62 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             } finally {
                 if (synthesizer != null) ttsConnectionPool.returnObject(poolLang, synthesizer);
             }
-        }, translateExecutor);
+        });
 
-        // ── 目标语链：翻译 → TTS ─────────────────────────────────────────
+        // ── 目标语链：翻译（translateExecutor 并行）→ TTS（langExecutor 串行）──
+        System.out.println("[PIPE-2-DEBUG] segIdx=" + segIdx + " sourceLang=" + sourceLang + " ALL_LANGS=" + ALL_LANGS + " will translate to:");
         for (String targetLang : ALL_LANGS) {
-            if (targetLang.equals(sourceLang)) continue;
+            if (targetLang.equals(sourceLang)) {
+                System.out.println("[PIPE-2-DEBUG]   skip " + targetLang + " (same as source)");
+                continue;
+            }
+            System.out.println("[PIPE-2-DEBUG]   will translate to: " + targetLang);
 
             final String tgt = targetLang;
-            CompletableFuture.runAsync(() -> {
-                try {
-                    TranslateRequest req = new TranslateRequest();
-                    req.setSegment(text);
-                    req.setSourceLang(sourceLang);
-                    req.setTargetLang(tgt);
-                    req.setKbEnabled(false);
+            ExecutorService tgtExec = langExecutors.getOrDefault(tgt, translateExecutor);
 
-                    long xlStart = System.currentTimeMillis();
+            // 翻译在通用线程池并行执行，完成后把 TTS 任务提交到目标语专属执行器
+            CompletableFuture.supplyAsync(() -> {
+                System.out.println("[PIPE-3-START] segIdx=" + segIdx + " translating from " + sourceLang + " to " + tgt);
+                TranslateRequest req = new TranslateRequest();
+                req.setSegment(text);
+                req.setSourceLang(sourceLang);
+                req.setTargetLang(tgt);
+                req.setKbEnabled(false);
+
+                long xlStart = System.currentTimeMillis();
+                try {
                     String translated = translateService.translate(req).translation();
                     long xlMs = System.currentTimeMillis() - xlStart;
-
                     if (translated == null || translated.isBlank()) {
                         log.warn("[PIPE-3-XLAT-EMPTY] segIdx={} tgt={} durationMs={}", segIdx, tgt, xlMs);
-                        return;
+                        return null;
                     }
+                    System.out.println("[PIPE-3-XLAT-DONE] segIdx=" + segIdx + " tgt=" + tgt + " durationMs=" + xlMs + " textLen=" + translated.length() + " translated=" + translated.substring(0, Math.min(50, translated.length())));
                     log.info("[PIPE-3-XLAT-DONE] segIdx={} tgt={} durationMs={} textLen={}",
                             segIdx, tgt, xlMs, translated.length());
-
-                    broadcastTranslation(roomId, segIdx, text, translated, sourceLang, tgt, floor, segmentTs);
-
-                    TtsConnectionPool.Lang poolLang = toPoolLang(tgt);
-                    SpeechSynthesizer synthesizer = null;
-                    try {
-                        synthesizer = ttsConnectionPool.borrow(poolLang);
-                        doTts(synthesizer, buildTtsParam(tgt), translated, segIdx, tgt, roomId);
-                    } finally {
-                        if (synthesizer != null) ttsConnectionPool.returnObject(poolLang, synthesizer);
-                    }
-                    roomWebSocketHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
-
+                    return translated;
                 } catch (Exception e) {
-                    log.error("[PIPE-3] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage(), e);
+                    System.out.println("[PIPE-3-XLAT-ERROR] segIdx=" + segIdx + " tgt=" + tgt + " error=" + e.getMessage());
+                    log.error("[PIPE-3-XLAT-ERROR] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage());
+                    return null;
                 }
-            }, translateExecutor);
+            }, translateExecutor).thenAcceptAsync(translated -> {
+                if (translated == null) return;
+                broadcastTranslation(roomId, segIdx, text, translated, sourceLang, tgt, floor, segmentTs);
+
+                TtsConnectionPool.Lang poolLang = toPoolLang(tgt);
+                SpeechSynthesizer synthesizer = null;
+                try {
+                    synthesizer = ttsConnectionPool.borrow(poolLang);
+                    doTts(synthesizer, buildTtsParam(tgt), translated, segIdx, tgt, roomId);
+                    roomWebSocketHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
+                } catch (Exception e) {
+                    log.error("[PIPE-3-TTS] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage());
+                } finally {
+                    if (synthesizer != null) ttsConnectionPool.returnObject(poolLang, synthesizer);
+                }
+            }, tgtExec);  // TTS 和广播在目标语专属单线程执行器上执行
         }
     }
 

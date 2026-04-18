@@ -99,12 +99,14 @@ public class DashScopeSdkWrapper {
                 .transcriptionEnabled(true)
                 .translationEnabled(false)
                 .sourceLanguage("auto")
+                .semanticPunctationEnabled(false)  // 关闭语义标点等待，减少缓冲延迟（旧 WebSocket 实现已明确关闭此项）
+                .maxEndSilence(400)                // VAD 静音超时 300ms，加快尾句触发
                 .build();
         long paramBuildNs = System.nanoTime() - paramBuildStart;
 
         log.info("[SDK-PARAM] sessionId={} 参数构建耗时={}ns", sessionId, paramBuildNs);
-        log.info("[SDK-PARAM] sessionId={} model={} format={} sampleRate={} transcriptionEnabled={} translationEnabled={} sourceLanguage={}",
-                sessionId, "gummy-realtime-v1", "pcm", 16000, true, false, "auto");
+        log.info("[SDK-PARAM] sessionId={} model={} format={} sampleRate={} transcriptionEnabled={} translationEnabled={} sourceLanguage={} semanticPunctation={} maxEndSilence={}",
+                sessionId, "gummy-realtime-v1", "pcm", 16000, true, false, "auto", false, 300);
 
         // 创建识别器
         long translatorCreateStart = System.nanoTime();

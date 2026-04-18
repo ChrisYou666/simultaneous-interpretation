@@ -75,7 +75,7 @@ app:
     model: ${TTS_MODEL:cosyvoice-v3-flash}
     voice-zh: ${TTS_VOICE_ZH:longanyang}
     voice-en: ${TTS_VOICE_EN:longanhuan}
-    voice-id: ${TTS_VOICE_ID:longanhuan}
+    voice-id: ${TTS_VOICE_ID:loongindah_v3}
     sample-rate: ${TTS_SAMPLE_RATE:24000}
 
   # ASR 调参（支持运行时 /api/tuning/params 动态修改）

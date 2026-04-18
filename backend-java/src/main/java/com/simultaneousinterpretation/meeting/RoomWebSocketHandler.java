@@ -307,10 +307,20 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
 
     ByteBuffer sendBuf = ByteBuffer.wrap(frame);
     int sent = 0;
+    int skippedLangMismatch = 0;
     for (WebSocketSession s : listeners) {
       if (!s.isOpen()) continue;
       SessionInfo info = sessionInfoMap.get(s.getId());
-      if (info == null || !lang.equals(info.listenLang)) continue;
+      if (info == null) {
+        log.debug("[PIPE-5-SKIP] sessionId={} info=null", s.getId());
+        continue;
+      }
+      if (!lang.equals(info.listenLang)) {
+        skippedLangMismatch++;
+        log.debug("[PIPE-5-SKIP] sessionId={} lang mismatch: audioLang={} listenerLang={}",
+            s.getId(), lang, info.listenLang);
+        continue;
+      }
       try {
         s.sendMessage(new BinaryMessage(sendBuf.duplicate(), true));
         sent++;
@@ -319,11 +329,11 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       }
     }
     if (sent > 0) {
-      log.info("[PIPE-5-AUDIO] segIdx={} sentIdx={} lang={} type={} sentListeners={} frameBytes={} wallMs={}",
-          segIdx, sentenceIdx, lang, frameType, sent, frame.length, System.currentTimeMillis());
+      log.info("[PIPE-5-AUDIO] segIdx={} sentIdx={} lang={} type={} sentListeners={} skippedMismatch={} frameBytes={} wallMs={}",
+          segIdx, sentenceIdx, lang, frameType, sent, skippedLangMismatch, frame.length, System.currentTimeMillis());
     } else {
-      log.debug("[PIPE-5-NO-LISTENERS] segIdx={} sentIdx={} lang={} type={} totalListeners={}",
-          segIdx, sentenceIdx, lang, frameType, listeners.size());
+      log.warn("[PIPE-5-NO-LISTENERS] segIdx={} sentIdx={} lang={} type={} totalListeners={} skippedMismatch={}",
+          segIdx, sentenceIdx, lang, frameType, listeners.size(), skippedLangMismatch);
     }
   }
 

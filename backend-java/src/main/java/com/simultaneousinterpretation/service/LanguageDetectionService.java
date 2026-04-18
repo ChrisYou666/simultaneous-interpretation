@@ -24,14 +24,17 @@ public class LanguageDetectionService {
 
     private final com.simultaneousinterpretation.config.LangDetectProperties props;
 
-    // 高频印尼语词 (Top 50 常用词)
+    // 高频印尼语词 (Top 80 常用词，补充短词和语气词)
     private final Set<String> INDONESIAN_COMMON_WORDS = Set.of(
         "yang", "dan", "di", "ke", "dari", "dengan", "untuk", "adalah", "ini", "itu",
         "pada", "dalam", "tidak", "akan", "atau", "juga", "sebagai", "oleh", "ada",
         "sudah", "saya", "kami", "kita", "mereka", "anda", "dia", "nya", "lah", "kan",
         "pun", "serta", "bisa", "harus", "lebih", "sangat", "sekali", "tersebut",
         "masih", "lagi", "karena", "jadi", "bukan", "apa", "siapa", "mana", "bagaimana",
-        "mengapa", "bilang", "pergi", "datang", "lihat", "buat", "ambil", "beri", "dengar"
+        "mengapa", "bilang", "pergi", "datang", "lihat", "buat", "ambil", "beri", "dengar",
+        // 补充短词和常用词
+        "ya", "si", "ni", "tu", "de", "lo", "ko", "do", "na", "ka",
+        "iya", "tak", "gak", "nggak", "aja", "banget", "nih", "tuh", "dong"
     );
 
     // 高频英语词 (Top 50 常用词)
@@ -46,13 +49,15 @@ public class LanguageDetectionService {
     // 印尼语特征 bigram (排除与英语高度重叠的)
     private final Set<String> INDONESIAN_NGRAM = Set.of(
         "ng", "ah", "pe", "me", "da", "ny", "sy", "mu", "nu",
-        "lu", "pu", "ru", "ja", "ku", "tu", "su", "bu", "du", "ba", "ha"
+        "lu", "pu", "ru", "ja", "ku", "tu", "su", "bu", "du", "ba", "ha",
+        "er", "an", "en", "in", "un", "ke", "ka", "ki", "ko", "nj"
     );
 
     // 英语特征 bigram (排除与印尼语重叠的)
     private final Set<String> ENGLISH_NGRAM = Set.of(
         "th", "he", "in", "re", "ed", "is", "at", "on", "st", "nt",
-        "ee", "of", "or", "nd", "ti", "es", "te", "er", "an", "al", "le", "ly"
+        "ee", "of", "or", "nd", "ti", "es", "te", "er", "al", "le", "ly",
+        "qu", "ck", "gh", "wh", "wr", "sc"
     );
 
     @PostConstruct
@@ -70,12 +75,25 @@ public class LanguageDetectionService {
 
         try {
             String lang = detectImpl(text.trim());
-            log.debug("语言检测: textLen={}, result={}", text.length(), lang);
+            // 增强日志：记录检测过程和得分
+            if (log.isInfoEnabled() || shouldLogForDebug(text)) {
+                log.info("[LANG-DETECT] text=\"{}\" textLen={} detectedLang={}", 
+                    text.length() > 50 ? text.substring(0, 50) + "..." : text,
+                    text.length(), lang);
+            }
             return lang;
         } catch (Exception e) {
             log.warn("语言检测异常: {}", e.getMessage());
             return "";
         }
+    }
+
+    // 短文本或包含印尼语特征的文本需要详细日志
+    private boolean shouldLogForDebug(String text) {
+        if (text.length() < 30) return true;
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("yang") || lower.contains("dan") || lower.contains("di") 
+            || lower.contains("ini") || lower.contains("itu") || lower.contains("ada");
     }
 
     private String detectImpl(String text) {
@@ -98,7 +116,8 @@ public class LanguageDetectionService {
             return detectLatin(text.toLowerCase(Locale.ROOT));
         }
 
-        return "";
+        // 兜底：尝试返回印尼语
+        return Constants.LANG_ID;
     }
 
     private String detectLatin(String text) {
@@ -115,11 +134,11 @@ public class LanguageDetectionService {
             if (ENGLISH_COMMON_WORDS.contains(word)) enWordScore++;
         }
 
-        // 单词得分权重更高
-        if (idWordScore > enWordScore && idWordScore >= 1) {
+        // 单词得分权重更高（降低门槛）
+        if (idWordScore > 0 && idWordScore >= enWordScore) {
             return Constants.LANG_ID;
         }
-        if (enWordScore > idWordScore && enWordScore >= 1) {
+        if (enWordScore > 0 && enWordScore > idWordScore) {
             return Constants.LANG_EN;
         }
 
@@ -127,15 +146,15 @@ public class LanguageDetectionService {
         int idScore = scoreNgrams(text, INDONESIAN_NGRAM);
         int enScore = scoreNgrams(text, ENGLISH_NGRAM);
 
-        // 使用相对比率而非绝对阈值
+        // 使用相对比率（印尼语阈值更低因为它更独特）
         double idRatio = (double) idScore / Math.max(clean.length() - 1, 1);
         double enRatio = (double) enScore / Math.max(clean.length() - 1, 1);
 
-        // 印尼语特征 bigram 更独特
-        if (idScore > enScore + 1 && idRatio > 0.08) {
+        // 印尼语特征 bigram 更独特，降低阈值
+        if (idScore > 0 && idScore >= enScore && idRatio > 0.05) {
             return Constants.LANG_ID;
         }
-        if (enScore > idScore && enRatio > 0.08) {
+        if (enScore > 0 && enScore > idScore && enRatio > 0.06) {
             return Constants.LANG_EN;
         }
 

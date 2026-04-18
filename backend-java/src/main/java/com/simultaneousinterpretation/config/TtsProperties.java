@@ -14,7 +14,6 @@ public class TtsProperties {
   private String voiceEn = "longanhuan";
   private String voiceId = "longanhuan";
   private int sampleRate = 24000;
-  private double speechRate = 1.0;
   private int timeoutSec = 23;
   private int maxRetry = 2;
   private int maxConcurrent = 8;
@@ -36,9 +35,6 @@ public class TtsProperties {
 
   public int getSampleRate() { return sampleRate; }
   public void setSampleRate(int sampleRate) { this.sampleRate = sampleRate; }
-
-  public double getSpeechRate() { return speechRate; }
-  public void setSpeechRate(double speechRate) { this.speechRate = speechRate; }
 
   public int getTimeoutSec() { return timeoutSec; }
   public void setTimeoutSec(int timeoutSec) { this.timeoutSec = timeoutSec; }

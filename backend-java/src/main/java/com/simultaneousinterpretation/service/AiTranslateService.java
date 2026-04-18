@@ -70,16 +70,26 @@ public class AiTranslateService {
     boolean usedMeeting =
         req.isKbEnabled() && StringUtils.hasText(req.getMeetingMaterialsText());
 
-    String system = buildSystemPrompt(req, usedImages);
-    UserMessage user = buildUserMessage(req);
+    String srcLang = mapLangCode(req.getSourceLang());
+    String tgtLang = mapLangCode(req.getTargetLang());
+    System.out.println("[TRANSLATE-DEBUG] sourceLang=" + req.getSourceLang() + "->" + srcLang + " targetLang=" + req.getTargetLang() + "->" + tgtLang + " textLen=" + (req.getSegment() != null ? req.getSegment().length() : 0));
 
-    Response<AiMessage> response =
-        model.generate(List.of(SystemMessage.from(system), user));
-    String text = response.content().text();
-    if (text == null || text.isBlank()) {
-      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回为空");
+    String system = buildSystemPrompt(req, usedImages);
+    UserMessage user = buildUserMessage(req, srcLang, tgtLang);
+
+    try {
+      Response<AiMessage> response =
+          model.generate(List.of(SystemMessage.from(system), user));
+      String text = response.content().text();
+      if (text == null || text.isBlank()) {
+        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回为空");
+      }
+      System.out.println("[TRANSLATE-RESULT] targetLang=" + req.getTargetLang() + " resultLen=" + text.length() + " result=" + text.substring(0, Math.min(100, text.length())));
+      return new TranslateResponse(text.trim(), modelName, usedImages, usedMeeting);
+    } catch (Exception e) {
+      System.out.println("[TRANSLATE-ERROR] targetLang=" + req.getTargetLang() + " error=" + e.getMessage());
+      throw e;
     }
-    return new TranslateResponse(text.trim(), modelName, usedImages, usedMeeting);
   }
 
   private ChatLanguageModel getOrCreateModel(String apiKey, String baseUrl, String modelName) {
@@ -148,14 +158,12 @@ public class AiTranslateService {
     return sb.toString();
   }
 
-  private UserMessage buildUserMessage(TranslateRequest req) {
-    String src = StringUtils.hasText(req.getSourceLang()) ? req.getSourceLang() : "auto";
-    String tgt = StringUtils.hasText(req.getTargetLang()) ? req.getTargetLang() : "zh";
+  private UserMessage buildUserMessage(TranslateRequest req, String srcLangName, String tgtLangName) {
     String userText =
         "请将下面片段从 "
-            + src
+            + srcLangName
             + " 译为 "
-            + tgt
+            + tgtLangName
             + "，语气适合会议口译现场。原文：\n"
             + req.getSegment().trim();
 
@@ -173,5 +181,21 @@ public class AiTranslateService {
     }
 
     return UserMessage.from(parts.toArray(Content[]::new));
+  }
+
+  /**
+   * 将语言代码转换为人类可读的语言名称，确保翻译模型正确理解。
+   */
+  private String mapLangCode(String code) {
+    if (code == null || code.isBlank()) return "auto";
+    return switch (code.toLowerCase()) {
+      case "zh", "chinese" -> "中文";
+      case "en", "english" -> "英文";
+      case "in", "id", "indonesian", "bahasa" -> "印尼语";
+      case "ja", "japanese" -> "日语";
+      case "ko", "korean" -> "韩语";
+      case "ms", "malay" -> "马来语";
+      default -> code;
+    };
   }
 }

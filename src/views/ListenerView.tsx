@@ -86,6 +86,7 @@ export function ListenerView() {
   const [hostPresent, setHostPresent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
+  const [displayRate, setDisplayRate] = useState(1.0); // 用于 UI 显示
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const wsRef = useRef<WebSocket | null>(null);
@@ -101,6 +102,20 @@ export function ListenerView() {
   /** 已调度过首帧的 segIdx 集合（用于 playingSegIdx 时序更新） */
   const segFirstChunkRef = useRef<Set<number>>(new Set());
 
+  /** 动态语速控制 */
+  const playbackRateRef = useRef<number>(1.0);
+  /** 上次调整语速的时刻（毫秒），避免频繁调整 */
+  const lastRateAdjustRef = useRef<number>(0);
+
+  // 语速调整阈值配置
+  const SPEED_UP_THRESHOLD_S = 3;   // 积压超过 3 秒才加速（收紧条件）
+  const SPEED_DOWN_THRESHOLD_S = 1.5; // 积压低于 1.5 秒开始减速（更敏感）
+  const MIN_RATE = 1.0;
+  const MAX_RATE = 1.5;            // 限制最大倍速，避免过快（从2.0降到1.5）
+  const RATE_STEP_UP = 0.008;      // 加速步长稍小
+  const RATE_STEP_DOWN = 0.02;     // 减速步长更大，快速恢复
+  const RATE_ADJUST_INTERVAL_MS = 500; // 每 500ms 检查一次
+
   // ── AudioContext 懒初始化（用户手势后创建） ──────────────────────────────
   const getAudioCtx = useCallback((): AudioContext => {
     if (audioCtxRef.current) return audioCtxRef.current;
@@ -114,6 +129,53 @@ export function ListenerView() {
     masterGainRef.current = gain;
     return ctx;
   }, []);
+
+  // ── 动态调整播放速率 ──────────────────────────────────────────────────────
+  const adjustPlaybackRate = useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+
+    const now = performance.now();
+    // 避免过于频繁调整
+    if (now - lastRateAdjustRef.current < RATE_ADJUST_INTERVAL_MS) return;
+    lastRateAdjustRef.current = now;
+
+    const currentRate = playbackRateRef.current;
+
+    // 计算待播放时长：基于时间轴计算
+    // nextScheduleRef.current 是下一个音频帧应该开始播放的时间点
+    // 如果这个时间 > ctx.currentTime，说明有待播放内容
+    const scheduleAhead = Math.max(0, nextScheduleRef.current - ctx.currentTime);
+
+    // 将时间轴待播放时长转换为"原始音频时长"（考虑当前播放速率）
+    // 如果加速播放，实际播放更快，所以需要更多原始内容来填满等待时间
+    const rawPending = scheduleAhead * currentRate;
+
+    // 滞后程度 = 原始待播放时长 - 当前速率下应有的时长
+    // 例如：2x 速率时，scheduleAhead=10s，但实际只需要 5s 的原始内容
+    const lagSeconds = rawPending - scheduleAhead;
+
+    // 加速条件：时间轴积压 > 3 秒
+    if (scheduleAhead > SPEED_UP_THRESHOLD_S && currentRate < MAX_RATE) {
+      const newRate = Math.min(MAX_RATE, currentRate + RATE_STEP_UP);
+      playbackRateRef.current = newRate;
+      setDisplayRate(newRate);
+      console.info(`[Speed] ↑ 加速: ${newRate.toFixed(2)}x (ahead=${scheduleAhead.toFixed(1)}s lag=${lagSeconds.toFixed(1)}s)`);
+    }
+    // 减速条件：时间轴积压 < 1.5 秒
+    else if (scheduleAhead < SPEED_DOWN_THRESHOLD_S && currentRate > MIN_RATE) {
+      const newRate = Math.max(MIN_RATE, currentRate - RATE_STEP_DOWN); // 更大步长快速恢复
+      playbackRateRef.current = newRate;
+      setDisplayRate(newRate);
+      console.info(`[Speed] ↓ 减速: ${newRate.toFixed(2)}x (ahead=${scheduleAhead.toFixed(1)}s)`);
+    }
+  }, []);
+
+  // 定时检查语速（每 500ms）
+  useEffect(() => {
+    const interval = setInterval(adjustPlaybackRate, RATE_ADJUST_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [adjustPlaybackRate]);
 
   // ── PCM 流式调度 ─────────────────────────────────────────────────────────
   const handleBinaryFrame = useCallback((buffer: ArrayBuffer) => {
@@ -133,12 +195,19 @@ export function ListenerView() {
       const audioBuf = ctx.createBuffer(1, samples, 24000);
       audioBuf.copyToChannel(float, 0);
 
+      // 计算原始音频时长（秒），用于语速控制
+      const rawDuration = samples / 24000;
+
       // 追加到全局时间轴末尾；若时间轴落后于当前时刻，从 currentTime + 50ms 重新开始
       const startTime = Math.max(nextScheduleRef.current, ctx.currentTime + 0.05);
-      nextScheduleRef.current = startTime + audioBuf.duration;
+      // 调整后的时长（加速播放时实际播放时间更短）
+      const adjustedDuration = rawDuration / playbackRateRef.current;
+      // 更新时间轴
+      nextScheduleRef.current = startTime + adjustedDuration;
 
       const src = ctx.createBufferSource();
       src.buffer = audioBuf;
+      src.playbackRate.value = playbackRateRef.current;
       src.connect(masterGainRef.current ?? ctx.destination);
       src.start(startTime);
 
@@ -330,7 +399,20 @@ export function ListenerView() {
       } else {
         // 二进制音频帧
         const blob = m.data as Blob;
-        blob.arrayBuffer().then(handleBinaryFrame);
+        console.info("[Listener-WS-BINARY] ★ receiveTs=%.2f type=%s size=%d", 
+          receiveTs, blob.type, blob.size);
+        blob.arrayBuffer().then((buf) => {
+          const frame = parseAudioFrame(buf);
+          if (frame) {
+            console.info("[Listener-BINARY-PARSE] ★ lang=%s type=%d segIdx=%d dataLen=%d currentListenLang=%s",
+              frame.lang, frame.type, frame.segIdx, frame.data.byteLength, listenLangRef.current);
+          } else {
+            console.warn("[Listener-BINARY-PARSE] ★ 解析失败 bufLen=%d", buf.byteLength);
+          }
+          handleBinaryFrame(buf);
+        }).catch((e) => {
+          console.error("[Listener-BINARY-ERROR] ★ %s", e.message);
+        });
       }
     };
 
@@ -567,6 +649,18 @@ export function ListenerView() {
         }
         .listener-mute-btn:hover { background: rgba(255,255,255,0.25); }
         .listener-mute-btn--muted { background: rgba(220,38,38,0.3); border-color: rgba(220,38,38,0.5); }
+        .listener-speed-indicator {
+          margin-left: 12px;
+          padding: 4px 12px;
+          border: 1px solid rgba(255,255,255,0.4);
+          border-radius: 8px;
+          background: rgba(255,255,255,0.15);
+          color: white;
+          font-size: 14px;
+          min-width: 60px;
+          text-align: center;
+        }
+        .listener-speed-indicator.fast { background: rgba(74,222,128,0.3); border-color: rgba(74,222,128,0.5); }
         .listener-live-transcript {
           display: flex;
           align-items: flex-start;
@@ -612,16 +706,21 @@ export function ListenerView() {
           {connected && roomId && <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.9 }}>{roomId}</span>}
         </div>
         {connected && (
-          <button
-            className={`listener-mute-btn ${audioMuted ? "listener-mute-btn--muted" : ""}`}
-            onClick={() => {
-              const next = !audioMuted;
-              setAudioMuted(next);
-              audioMutedRef.current = next;
-              if (masterGainRef.current) masterGainRef.current.gain.value = next ? 0 : 1;
-            }}>
-            {audioMuted ? "已静音" : "开声音"}
-          </button>
+          <>
+            <div className={`listener-speed-indicator ${displayRate > 1.0 ? 'fast' : ''}`}>
+              {displayRate.toFixed(2)}x
+            </div>
+            <button
+              className={`listener-mute-btn ${audioMuted ? "listener-mute-btn--muted" : ""}`}
+              onClick={() => {
+                const next = !audioMuted;
+                setAudioMuted(next);
+                audioMutedRef.current = next;
+                if (masterGainRef.current) masterGainRef.current.gain.value = next ? 0 : 1;
+              }}>
+              {audioMuted ? "已静音" : "开声音"}
+            </button>
+          </>
         )}
       </div>
 
