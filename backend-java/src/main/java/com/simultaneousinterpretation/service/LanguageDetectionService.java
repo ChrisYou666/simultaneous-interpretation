@@ -1,156 +1,171 @@
 package com.simultaneousinterpretation.service;
 
 import com.simultaneousinterpretation.common.Constants;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.*;
+
 /**
- * 语言检测服务
- * <p>
- * 基于字符 N-gram 频率分析的语言检测，支持 zh/en/id 三语
+ * 语言检测服务 (低延迟版)
  *
- * @author System
- * @version 1.0.0
+ * 策略:
+ * 1. 中文: CJK Unicode 范围检测，<1ms
+ * 2. 印尼语: 高频词匹配 + ngram 分析
+ * 3. 英语: 高频词匹配 + ngram 分析
+ * 4. 兜底: 字母频率分布区分
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class LanguageDetectionService {
 
-    /**
-     * 支持的语言列表
-     */
-    private static final java.util.List<String> SUPPORTED_LANGS = java.util.List.of(
-            Constants.LANG_ZH, 
-            Constants.LANG_EN, 
-            Constants.LANG_ID
-    );
-
     private final com.simultaneousinterpretation.config.LangDetectProperties props;
 
-    /**
-     * 检测文本语种
-     *
-     * @param text 待检测文本
-     * @return 三语码（zh/en/id）或空字符串（无法确认）
-     */
+    // 高频印尼语词 (Top 50 常用词)
+    private final Set<String> INDONESIAN_COMMON_WORDS = Set.of(
+        "yang", "dan", "di", "ke", "dari", "dengan", "untuk", "adalah", "ini", "itu",
+        "pada", "dalam", "tidak", "akan", "atau", "juga", "sebagai", "oleh", "ada",
+        "sudah", "saya", "kami", "kita", "mereka", "anda", "dia", "nya", "lah", "kan",
+        "pun", "serta", "bisa", "harus", "lebih", "sangat", "sekali", "tersebut",
+        "masih", "lagi", "karena", "jadi", "bukan", "apa", "siapa", "mana", "bagaimana",
+        "mengapa", "bilang", "pergi", "datang", "lihat", "buat", "ambil", "beri", "dengar"
+    );
+
+    // 高频英语词 (Top 50 常用词)
+    private final Set<String> ENGLISH_COMMON_WORDS = Set.of(
+        "the", "be", "to", "of", "and", "a", "in", "that", "have", "i",
+        "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
+        "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
+        "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
+        "so", "up", "out", "if", "about", "who", "get", "which", "go", "me"
+    );
+
+    // 印尼语特征 bigram (排除与英语高度重叠的)
+    private final Set<String> INDONESIAN_NGRAM = Set.of(
+        "ng", "ah", "pe", "me", "da", "ny", "sy", "mu", "nu",
+        "lu", "pu", "ru", "ja", "ku", "tu", "su", "bu", "du", "ba", "ha"
+    );
+
+    // 英语特征 bigram (排除与印尼语重叠的)
+    private final Set<String> ENGLISH_NGRAM = Set.of(
+        "th", "he", "in", "re", "ed", "is", "at", "on", "st", "nt",
+        "ee", "of", "or", "nd", "ti", "es", "te", "er", "an", "al", "le", "ly"
+    );
+
+    @PostConstruct
+    public void init() {
+        log.info("LanguageDetectionService 初始化完成，支持语言: zh/en/id");
+    }
+
     public String detect(String text) {
         if (!props.isEnabled()) {
-            log.debug("语言检测未启用，直接返回空");
             return "";
         }
         if (text == null || text.isBlank()) {
-            log.debug("语言检测参数为空，返回空");
-            return "";
-        }
-
-        String trimmed = text.trim();
-        if (trimmed.isEmpty()) {
             return "";
         }
 
         try {
-            String lang = detectImpl(trimmed);
-            log.debug("语言检测完成，文本长度={}, 检测结果={}", trimmed.length(), lang);
-
-            if (!SUPPORTED_LANGS.contains(lang)) {
-                log.debug("检测结果不在支持列表中，返回空");
-                return "";
-            }
-
+            String lang = detectImpl(text.trim());
+            log.debug("语言检测: textLen={}, result={}", text.length(), lang);
             return lang;
         } catch (Exception e) {
-            log.warn("语言检测异常，文本长度={}, error={}", trimmed.length(), e.getMessage());
+            log.warn("语言检测异常: {}", e.getMessage());
             return "";
         }
     }
 
-    /**
-     * 检测实现
-     */
     private String detectImpl(String text) {
         int cjkCount = countCjkChars(text);
         int latinCount = countLatinLetters(text);
 
-        // 中文判定
+        // 1. 中文检测
         if (cjkCount >= 1) {
-            if (latinCount == 0 || cjkCount >= latinCount * 0.5) {
+            if (latinCount == 0 || cjkCount >= latinCount) {
                 return Constants.LANG_ZH;
             }
-            return Constants.LANG_ZH;
+            // 混合文本: 中文字符更多或相当
+            if (cjkCount >= latinCount * 0.5) {
+                return Constants.LANG_ZH;
+            }
         }
 
-        // 纯拉丁字母文本：区分英语和印尼语
-        if (latinCount >= 2) {
-            double idScore = scoreIndonesian(text);
-            double enScore = scoreEnglish(text);
-            
-            if (log.isDebugEnabled()) {
-                log.debug("印尼语评分={}, 英语评分={}", 
-                         String.format("%.3f", idScore), 
-                         String.format("%.3f", enScore));
-            }
-            
-            if (idScore > enScore && idScore > 0.15) {
-                return Constants.LANG_ID;
-            }
-            if (enScore > 0.15) {
-                return Constants.LANG_EN;
-            }
-            return "";
+        // 2. 纯拉丁文本
+        if (latinCount >= 3) {
+            return detectLatin(text.toLowerCase(Locale.ROOT));
         }
 
         return "";
     }
 
-    /**
-     * 印尼语评分
-     */
-    private double scoreIndonesian(String text) {
-        String lower = text.toLowerCase(java.util.Locale.ROOT);
-        int bigrams = 0;
-        for (int i = 0; i < lower.length() - 1; i++) {
-            String bg = lower.substring(i, i + 2);
-            if (isIndonesianBigram(bg)) {
-                bigrams++;
+    private String detectLatin(String text) {
+        // 移除标点和空格
+        String clean = text.replaceAll("[^a-z]", "");
+        if (clean.length() < 2) return "";
+
+        // 词级匹配
+        String[] words = clean.split("\\s+");
+        int idWordScore = 0;
+        int enWordScore = 0;
+        for (String word : words) {
+            if (INDONESIAN_COMMON_WORDS.contains(word)) idWordScore++;
+            if (ENGLISH_COMMON_WORDS.contains(word)) enWordScore++;
+        }
+
+        // 单词得分权重更高
+        if (idWordScore > enWordScore && idWordScore >= 1) {
+            return Constants.LANG_ID;
+        }
+        if (enWordScore > idWordScore && enWordScore >= 1) {
+            return Constants.LANG_EN;
+        }
+
+        // Ngram 得分
+        int idScore = scoreNgrams(text, INDONESIAN_NGRAM);
+        int enScore = scoreNgrams(text, ENGLISH_NGRAM);
+
+        // 使用相对比率而非绝对阈值
+        double idRatio = (double) idScore / Math.max(clean.length() - 1, 1);
+        double enRatio = (double) enScore / Math.max(clean.length() - 1, 1);
+
+        // 印尼语特征 bigram 更独特
+        if (idScore > enScore + 1 && idRatio > 0.08) {
+            return Constants.LANG_ID;
+        }
+        if (enScore > idScore && enRatio > 0.08) {
+            return Constants.LANG_EN;
+        }
+
+        // 字母频率分布兜底
+        return detectByLetterFrequency(clean);
+    }
+
+    private int scoreNgrams(String text, Set<String> ngrams) {
+        int score = 0;
+        for (int i = 0; i < text.length() - 1; i++) {
+            String bigram = text.substring(i, i + 2);
+            if (ngrams.contains(bigram)) {
+                score++;
             }
         }
-        return (double) bigrams / Math.max(lower.length() - 1, 1);
+        return score;
     }
 
-    /**
-     * 英语评分
-     */
-    private double scoreEnglish(String text) {
-        String lower = text.toLowerCase(java.util.Locale.ROOT);
-        int bigrams = 0;
-        for (int i = 0; i < lower.length() - 1; i++) {
-            String bg = lower.substring(i, i + 2);
-            if (isEnglishBigram(bg)) {
-                bigrams++;
-            }
+    private String detectByLetterFrequency(String text) {
+        // 印尼语特征字母: q, x 罕见，v 少用
+        // 英语特征字母: v, w 较常见
+
+        long vCount = text.chars().filter(c -> c == 'v' || c == 'w').count();
+        double foreignRatio = (double) vCount / text.length();
+
+        if (foreignRatio > 0.05) {
+            return Constants.LANG_EN;
         }
-        return (double) bigrams / Math.max(lower.length() - 1, 1);
-    }
 
-    private boolean isIndonesianBigram(String bg) {
-        return bg.equals("ng") || bg.equals("er") || bg.equals("te") || bg.equals("ah")
-            || bg.equals("an") || bg.equals("pe") || bg.equals("ke") || bg.equals("me")
-            || bg.equals("da") || bg.equals("ra") || bg.equals("di") || bg.equals("ka")
-            || bg.equals("pa") || bg.equals("sa") || bg.equals("la") || bg.equals("ma")
-            || bg.equals("ba") || bg.equals("ha") || bg.equals("ja") || bg.equals("na")
-            || bg.equals("ny") || bg.equals("sy") || bg.equals("mu") || bg.equals("nu")
-            || bg.equals("ku") || bg.equals("tu") || bg.equals("su") || bg.equals("bu")
-            || bg.equals("lu") || bg.equals("pu") || bg.equals("du") || bg.equals("ru");
-    }
-
-    private boolean isEnglishBigram(String bg) {
-        return bg.equals("th") || bg.equals("he") || bg.equals("in") || bg.equals("er")
-            || bg.equals("re") || bg.equals("ed") || bg.equals("is") || bg.equals("at")
-            || bg.equals("on") || bg.equals("st") || bg.equals("nt") || bg.equals("ee")
-            || bg.equals("of") || bg.equals("to") || bg.equals("or") || bg.equals("en")
-            || bg.equals("nd") || bg.equals("ti") || bg.equals("es") || bg.equals("te");
+        return Constants.LANG_ID; // 默认倾向印尼语 (项目背景)
     }
 
     private static int countCjkChars(String s) {
