@@ -38,12 +38,11 @@ public class TuningController {
    * <p>请求体示例：
    * <pre>{@code
    * {
-   *   "segMaxChars": 30,
-   *   "segFlushTimeoutMs": 500
+   *   "dashscopeSemanticPunctuation": false
    * }
    * }</pre>
    *
-   * @return {"applied": ["segMaxChars", "segFlushTimeoutMs"], "current": {...snapshot...}}
+   * @return {"applied": ["dashscopeSemanticPunctuation"], "current": {...snapshot...}}
    */
   @PostMapping("/params")
   public Map<String, Object> updateParams(@RequestBody Map<String, Object> updates) {

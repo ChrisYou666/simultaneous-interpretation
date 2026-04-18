@@ -96,7 +96,7 @@ public class TranslateService {
             String userMessage = buildUserMessage(request);
 
             // 调用 AI 模型
-            String translatedText = llmIntegration.chat(systemPrompt, userMessage, apiKey);
+            String translatedText = llmIntegration.chat(systemPrompt, userMessage, apiKey, baseUrl, modelName);
 
             if (translatedText == null || translatedText.isBlank()) {
                 log.warn("翻译结果为空，请求参数：源语言={}, 目标语言={}", 

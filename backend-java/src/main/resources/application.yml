@@ -1,4 +1,4 @@
-# 运行目录下可查看 logs/si-backend.log（便于排查 DashScope 断连等问题）
+# 运行目录下可查看 logs/si-backend.log
 logging:
   file:
     name: logs/si-backend.log
@@ -17,52 +17,35 @@ server:
   address: ${SERVER_ADDRESS:0.0.0.0}
   tomcat:
     max-http-form-post-size: 52MB
-    # WebSocket 二进制消息缓冲区：53KB WAV 帧需要 ≥64KB
     max-swallow-size: 10MB
   error:
     include-message: always
     include-binding-errors: always
 
 app:
-  # 百炼统一 API Key（ASR / 翻译 / TTS 共用，只需配一次）
-  # 优先级：显式配置 > 环境变量 DASHSCOPE_API_KEY
   dashscope:
     api-key: ${DASHSCOPE_API_KEY:}
-    # ASR：本服务走百炼「实时语音识别」WebSocket（wss://.../api-ws/v1/inference/），run-task 的 model 须为官方文档列出的名称。
-    # 见：https://help.aliyun.com/zh/model-studio/fun-asr-realtime-websocket-api 与「实时语音识别」模型列表。
-    # 常用值：gummy-realtime-v1（多语种，中英印尼均支持，默认）、fun-asr-realtime、fun-asr-realtime-2026-02-28 等。
+    # ASR：gummy-realtime-v1 支持中/英/印尼三语自动检测
     asr-model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
     asr-ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
     asr-sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
     asr-semantic-punctuation: false
-    # 翻译（OpenAI 兼容 HTTP）
-    translate-model: ${TUNING_TRANSLATE_MODEL:qwen-turbo}
-    translate-base-url: ${TUNING_TRANSLATE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-    # TTS CosyVoice（HTTP SSE）
-    tts-model: ${TUNING_TTS_MODEL:cosyvoice-v3-flash}
-    tts-voice: ${TUNING_TTS_VOICE:longanyang}
-    tts-rate: ${TUNING_TTS_RATE:1.0}
+    # 翻译（供 TranslateService HTTP 试译使用）
+    translate-model: ${OPENAI_MODEL:qwen-turbo}
+    translate-base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
 
-  # ── 兼容旧配置（仅在未升级前保留，可逐步废弃）───────────────
-  # 旧字段仍可用；若 app.dashscope.api-key 已配置则优先使用
-  # api-key: ${API_KEY:}   ← 全局兜底，旧代码依赖
   jwt:
     secret: ${JWT_SECRET:si-dev-secret-change-in-production-min-32-chars!!}
     expiration-hours: ${JWT_EXPIRATION_HOURS:72}
-  # 试译：走 OpenAI 兼容 HTTP（LangChain4j OpenAiChatModel）。通义/Qwen 请用百炼密钥 + 兼容地址，不是必须用 OpenAI 官方 Key。
-  # 密钥优先 OPENAI_API_KEY；未设时与百炼共用 DASHSCOPE_API_KEY（与 dashscope 一致）。
-  # 若使用 OpenAI 官方：设 OPENAI_BASE_URL=https://api.openai.com/v1 与 OPENAI_MODEL=gpt-4o-mini 等。
+
   openai:
-    # 兼容旧字段：实际取 app.dashscope.api-key；若需单独试译密钥可保留此字段
     api-key: ${OPENAI_API_KEY:${DASHSCOPE_API_KEY:}}
     base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-    # 默认可用 qwen-turbo 等较快档；更强模型通常更慢，需单独测延迟
     model: ${OPENAI_MODEL:qwen-turbo}
-  # 流式 ASR：dashscope=Fun-ASR；deepgram=Deepgram Live；openai=OpenAI Realtime (gpt-4o-transcribe)
+
   asr:
     provider: ${ASR_PROVIDER:dashscope}
     dashscope:
-      # 兼容旧字段；实际取 app.dashscope.api-key
       api-key: ${DASHSCOPE_API_KEY:}
       ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
       model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
@@ -76,7 +59,6 @@ app:
       interim-results: true
       detect-language: true
     openai:
-      # 与翻译可共用 OPENAI_API_KEY；若需单独密钥可设 OPENAI_ASR_API_KEY
       api-key: ${OPENAI_ASR_API_KEY:${OPENAI_API_KEY:}}
       base-url: ${OPENAI_ASR_BASE_URL:https://api.openai.com/v1}
       model: ${OPENAI_ASR_MODEL:gpt-4o-transcribe}
@@ -86,15 +68,18 @@ app:
       vad-prefix-padding-ms: 300
       vad-suffix-padding-ms: 300
       vad-threshold: 0.5
-    # 切段：影响翻译/TTS 触发粒度与端到端延迟（数值越小、超时越短 → 越快但断句可能更碎）
-    segmentation:
-      max-chars: ${ASR_SEGMENT_MAX_CHARS:8}
-      soft-break-chars: ${ASR_SEGMENT_SOFT_BREAK_CHARS:4}
-      flush-timeout-ms: ${ASR_SEGMENT_FLUSH_TIMEOUT_MS:300}
-  # 流水线调参（支持运行时动态修改，无需重启）
-  # 模型参数现已统一迁移至 app.dashscope.*；tuning 仅保留运行时动态覆盖值
+
+  # TTS：CosyVoice 流式合成，三语分别配置音色
+  tts:
+    api-key: ${TTS_API_KEY:${DASHSCOPE_API_KEY:}}
+    model: ${TTS_MODEL:cosyvoice-v2}
+    voice-zh: ${TTS_VOICE_ZH:longanyang}
+    voice-en: ${TTS_VOICE_EN:loongabby_v3}
+    voice-id: ${TTS_VOICE_ID:loongindah_v3}
+    sample-rate: ${TTS_SAMPLE_RATE:16000}
+
+  # ASR 调参（支持运行时 /api/tuning/params 动态修改）
   tuning:
-    # ASR 阶段（默认值从 app.dashscope 同步，可通过环境变量或 /api/tuning/params 覆盖）
     asr-provider: ${ASR_PROVIDER:dashscope}
     dashscope-ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
     dashscope-model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
@@ -102,38 +87,8 @@ app:
     dashscope-semantic-punctuation: false
     deepgram-sample-rate: ${DEEPGRAM_ASR_SAMPLE_RATE:48000}
     deepgram-model: ${DEEPGRAM_MODEL:nova-2}
-    # 切段阶段（参考商用同声传译方案优化）
-    # 英文问句平均较长（8-15词），增大 maxChars 避免在问号处过早切分导致上下文丢失
-    seg-max-chars: ${TUNING_SEG_MAX_CHARS:50}
-    seg-en-max-chars-multiplier: ${TUNING_SEG_EN_MULTIPLIER:2.0}
-    seg-en-max-chars-min: ${TUNING_SEG_EN_MIN:10}
-    seg-en-max-chars-max: ${TUNING_SEG_EN_MAX:80}   # 英文问句可达60-80字符，增大避免断句
-    seg-id-max-chars-multiplier: ${TUNING_SEG_ID_MULTIPLIER:1.6}  # 印尼语词汇更长
-    seg-id-max-chars-min: ${TUNING_SEG_ID_MIN:10}
-    seg-id-max-chars-max: ${TUNING_SEG_ID_MAX:60}   # 印尼语独立阈值
-    seg-soft-break-chars: ${TUNING_SEG_SOFT_BREAK:15}
-    # 适当延长等待时间：英文/印尼语一句话可能包含多个分句，过短会导致切分过早
-    seg-flush-timeout-ms: ${TUNING_SEG_FLUSH_MS:500}
-    seg-tick-initial-ms: ${TUNING_SEG_TICK_INITIAL:200}
-    seg-tick-period-ms: ${TUNING_SEG_TICK_PERIOD:400}
-    # 翻译阶段
-    translate-model: ${TUNING_TRANSLATE_MODEL:qwen-turbo}
-    translate-base-url: ${TUNING_TRANSLATE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-    translate-max-tokens: ${TUNING_TRANSLATE_MAX_TOKENS:320}
-    translate-temperature: ${TUNING_TRANSLATE_TEMP:0.1}
-    translate-timeout-sec: ${TUNING_TRANSLATE_TIMEOUT:25}
-    translate-max-retries: ${TUNING_TRANSLATE_RETRIES:1}
-    # TTS 阶段
-    tts-rate: ${TUNING_TTS_RATE:1}
-    # 0=整段 WAV 一次下发（推荐）；>0 如 6144=流式首包更快，需听众端合并解码
-    tts-chunk-threshold: ${TUNING_TTS_CHUNK:0}
-    tts-max-concurrent: ${TUNING_TTS_CONCURRENT:8}
-    tts-model: ${TUNING_TTS_MODEL:cosyvoice-v3-flash}
-    tts-voice: ${TUNING_TTS_VOICE:longanyang}
-    # TTS 专用 API Key（与 ASR/翻译 隔离，避免 429）
-    tts-api-key: ${TUNING_TTS_API_KEY:sk-f2259f641b804b7981106869b41f1239}
-  # ── 语言检测（基于 Apache Tika，无需外部服务）───────────────────────
-  # ASR 未返回 language 时兜底检测源语。默认关闭（字形启发式推断已够用）
+
+  # 语言检测：bigram 评分，zh/en/id 三语，默认启用
   lang-detect:
-    enabled: ${LANG_DETECT_ENABLED:false}
+    enabled: ${LANG_DETECT_ENABLED:true}
     confidence-threshold: ${LANG_DETECT_CONFIDENCE_THRESHOLD:0.2}

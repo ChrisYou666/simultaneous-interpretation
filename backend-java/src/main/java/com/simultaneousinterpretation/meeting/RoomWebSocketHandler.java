@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
+import java.nio.ByteBuffer;
 
 import java.io.IOException;
 import java.util.*;
@@ -161,6 +162,97 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
   }
 
   /**
+   * 向房间内所有用户（主持端 + 全部听众）广播 JSON 文本消息。
+   */
+  public void broadcastJsonToAll(String roomId, String json) {
+    int sent = 0;
+
+    // 发送给主持人
+    WebSocketSession host = hostSessions.get(roomId);
+    if (host != null && host.isOpen()) {
+      try {
+        host.sendMessage(new TextMessage(json));
+        sent++;
+      } catch (IOException | IllegalStateException e) {
+        log.debug("[房间WS] 发送主持端失败: {}", e.getMessage());
+      }
+    }
+
+    // 发送给所有听众
+    Set<WebSocketSession> listeners = listenerSessions.get(roomId);
+    if (listeners != null && !listeners.isEmpty()) {
+      for (WebSocketSession s : listeners) {
+        if (!s.isOpen()) continue;
+        try {
+          s.sendMessage(new TextMessage(json));
+          sent++;
+        } catch (IOException | IllegalStateException e) {
+          log.debug("[房间WS-JSON-SEND-FAIL] session={} err={}", s.getId(), e.getMessage());
+        }
+      }
+    }
+
+    String eventType = "unknown";
+    try {
+      eventType = objectMapper.readTree(json).get("event").asText("unknown");
+    } catch (Exception ignored) {}
+
+    log.info("[房间WS-BROADCAST-ALL] roomId={} event={} sent={}", roomId, eventType, sent);
+  }
+
+  /**
+   * 广播带帧头的二进制音频块（WAV chunk）给订阅特定语言的听众。
+   *
+   * <p>帧格式：[4B segIdx big-endian][1B type=0x01][1B langLen][langLen bytes lang][audio bytes]
+   */
+  public void broadcastFramedAudioChunk(String roomId, int segIdx, String lang, byte[] audioData) {
+    byte[] frame = buildAudioFrame(segIdx, (byte) 0x01, lang, audioData);
+    broadcastBinaryToListenersByLang(roomId, lang, frame);
+  }
+
+  /**
+   * 广播带帧头的音频结束标记（END）给订阅特定语言的听众。
+   *
+   * <p>帧格式：[4B segIdx big-endian][1B type=0x03][1B langLen][langLen bytes lang]（无音频数据）
+   */
+  public void broadcastFramedAudioEnd(String roomId, int segIdx, String lang) {
+    byte[] frame = buildAudioFrame(segIdx, (byte) 0x03, lang, new byte[0]);
+    broadcastBinaryToListenersByLang(roomId, lang, frame);
+  }
+
+  private byte[] buildAudioFrame(int segIdx, byte type, String lang, byte[] audioData) {
+    byte[] langBytes = lang.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    ByteBuffer buf = ByteBuffer.allocate(4 + 1 + 1 + langBytes.length + audioData.length);
+    buf.putInt(segIdx);
+    buf.put(type);
+    buf.put((byte) langBytes.length);
+    buf.put(langBytes);
+    if (audioData.length > 0) buf.put(audioData);
+    return buf.array();
+  }
+
+  private void broadcastBinaryToListenersByLang(String roomId, String lang, byte[] frame) {
+    Set<WebSocketSession> listeners = listenerSessions.get(roomId);
+    if (listeners == null || listeners.isEmpty()) return;
+    ByteBuffer buf = ByteBuffer.wrap(frame);
+    int sent = 0;
+    for (WebSocketSession s : listeners) {
+      if (!s.isOpen()) continue;
+      SessionInfo info = sessionInfoMap.get(s.getId());
+      if (info == null || !lang.equals(info.listenLang)) continue;
+      try {
+        s.sendMessage(new BinaryMessage(buf.duplicate(), true));
+        sent++;
+      } catch (IOException e) {
+        log.debug("[房间WS-AUDIO-SEND-FAIL] session={} err={}", s.getId(), e.getMessage());
+      }
+    }
+    if (sent > 0) {
+      log.debug("[房间WS-AUDIO] roomId={} lang={} sent={} frameBytes={}", roomId, lang, sent, frame.length);
+    }
+  }
+
+  /**
    * 通知所有听众主持人 ASR 状态变化。
    */
   public void notifyListenersHostAsrStatus(String roomId, String status) {
@@ -174,23 +266,6 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
       return;
     }
     broadcastJsonToListeners(roomId, json);
-  }
-
-  /**
-   * 广播播放进度同步事件。
-   */
-  public void broadcastPlaybackEvent(String roomId, String type, int segIdx, String lang, int floor) {
-    Map<String, Object> msg = new HashMap<>();
-    msg.put("event", type);
-    msg.put("segIdx", segIdx);
-    msg.put("lang", lang);
-    msg.put("floor", floor);
-    try {
-      String json = objectMapper.writeValueAsString(msg);
-      broadcastJsonToListeners(roomId, json);
-    } catch (Exception e) {
-      log.debug("[房间WS] broadcastPlaybackEvent: {}", e.getMessage());
-    }
   }
 
   // ─── 内部工具 ──────────────────────────────────────────────────────────
