@@ -29,7 +29,7 @@ public class LanguageDetectionService {
                         Language.JAPANESE,
                         Language.KOREAN
                 )
-                .withMinimumRelativeDocumentLength(0.2)
+                .withMinimumRelativeDistance(0.2)
                 .withLowAccuracyMode()
                 .build();
 
