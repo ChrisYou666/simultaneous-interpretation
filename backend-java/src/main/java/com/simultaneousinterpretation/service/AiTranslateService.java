@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import dev.langchain4j.model.openai.OpenAiResponseException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -127,9 +126,6 @@ public class AiTranslateService {
     if (e instanceof ResponseStatusException rse) {
       int code = rse.getStatusCode().value();
       return code == 429 || code == 503;
-    }
-    if (e instanceof OpenAiResponseException oai) {
-      return oai.getStatusCode() == 429 || oai.getStatusCode() == 503;
     }
     String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
     return msg.contains("429") || msg.contains("rate limit") || msg.contains("throttle") || msg.contains("503");
