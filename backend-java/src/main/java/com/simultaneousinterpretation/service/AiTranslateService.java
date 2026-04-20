@@ -20,6 +20,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import dev.langchain4j.model.openai.OpenAiResponseException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -27,6 +29,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AiTranslateService {
+
+  private static final int MAX_RETRIES = 3;
+  private static final long[] RETRY_DELAYS_MS = { 1_000, 2_000, 4_000 };
 
   private static final int MAX_IMAGES = 8;
   private static final int MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -77,19 +82,57 @@ public class AiTranslateService {
     String system = buildSystemPrompt(req, usedImages);
     UserMessage user = buildUserMessage(req, srcLang, tgtLang);
 
-    try {
-      Response<AiMessage> response =
-          model.generate(List.of(SystemMessage.from(system), user));
-      String text = response.content().text();
-      if (text == null || text.isBlank()) {
-        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回为空");
-      }
-      System.out.println("[TRANSLATE-RESULT] targetLang=" + req.getTargetLang() + " resultLen=" + text.length() + " result=" + text.substring(0, Math.min(100, text.length())));
-      return new TranslateResponse(text.trim(), modelName, usedImages, usedMeeting);
-    } catch (Exception e) {
-      System.out.println("[TRANSLATE-ERROR] targetLang=" + req.getTargetLang() + " error=" + e.getMessage());
-      throw e;
+    String text = callWithRetry(model, system, user, req.getTargetLang());
+    if (text == null || text.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型返回为空");
     }
+    System.out.println("[TRANSLATE-RESULT] targetLang=" + req.getTargetLang() + " resultLen=" + text.length() + " result=" + text.substring(0, Math.min(100, text.length())));
+    return new TranslateResponse(text.trim(), modelName, usedImages, usedMeeting);
+  }
+
+  /**
+   * 带指数退避重试的 LLM 调用。
+   * <p>
+   * 遇到 429/503 限流错误时，按 1s → 2s → 4s 等待后重试，最多 3 次。
+   * 消除"失败越快、重试越多"的正反馈崩溃。
+   */
+  private String callWithRetry(ChatLanguageModel model, String system, UserMessage user, String targetLang) {
+    Exception lastException = null;
+    for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        Response<AiMessage> response = model.generate(List.of(SystemMessage.from(system), user));
+        return response.content().text();
+      } catch (Exception e) {
+        lastException = e;
+        if (attempt < MAX_RETRIES && isRetryable(e)) {
+          long delayMs = RETRY_DELAYS_MS[attempt];
+          System.out.println("[TRANSLATE-RETRY] targetLang=" + targetLang + " attempt=" + (attempt + 1) + "/" + (MAX_RETRIES + 1) + " 等待 " + delayMs + "ms 后重试，原因: " + e.getMessage());
+          try {
+            Thread.sleep(delayMs);
+          } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            break;
+          }
+        } else {
+          System.out.println("[TRANSLATE-ERROR] targetLang=" + targetLang + " attempt=" + (attempt + 1) + " 最终失败: " + e.getMessage());
+          break;
+        }
+      }
+    }
+    throw lastException != null ? new ResponseStatusException(HttpStatus.BAD_GATEWAY, "翻译服务调用失败: " + lastException.getMessage()) : new ResponseStatusException(HttpStatus.BAD_GATEWAY, "翻译服务调用失败");
+  }
+
+  /** 判断异常是否为限流/临时性错误，需触发重试 */
+  private boolean isRetryable(Exception e) {
+    if (e instanceof ResponseStatusException rse) {
+      int code = rse.getStatusCode().value();
+      return code == 429 || code == 503;
+    }
+    if (e instanceof OpenAiResponseException oai) {
+      return oai.getStatusCode() == 429 || oai.getStatusCode() == 503;
+    }
+    String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+    return msg.contains("429") || msg.contains("rate limit") || msg.contains("throttle") || msg.contains("503");
   }
 
   private ChatLanguageModel getOrCreateModel(String apiKey, String baseUrl, String modelName) {

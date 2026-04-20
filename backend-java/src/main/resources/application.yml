@@ -24,14 +24,14 @@ server:
 
 app:
   dashscope:
-    api-key: ${DASHSCOPE_API_KEY:}
+    api-key: ${DASHSCOPE_API_KEY:sk-f2259f641b804b7981106869b41f1239}
     # ASR：gummy-realtime-v1 支持中/英/印尼三语自动检测
     asr-model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
     asr-ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
     asr-sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
     asr-semantic-punctuation: false
     # 翻译（供 TranslateService HTTP 试译使用）
-    translate-model: ${OPENAI_MODEL:qwen-turbo}
+    translate-model: ${OPENAI_MODEL:qwen-flash}
     translate-base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
 
   jwt:
@@ -41,12 +41,12 @@ app:
   openai:
     api-key: ${OPENAI_API_KEY:${DASHSCOPE_API_KEY:}}
     base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-    model: ${OPENAI_MODEL:qwen-turbo}
+    model: ${OPENAI_MODEL:qwen-flash}
 
   asr:
     provider: ${ASR_PROVIDER:dashscope}
     dashscope:
-      api-key: ${DASHSCOPE_API_KEY:}
+      api-key: ${DASHSCOPE_API_KEY:sk-f2259f641b804b7981106869b41f1239}
       ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
       model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
       sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
