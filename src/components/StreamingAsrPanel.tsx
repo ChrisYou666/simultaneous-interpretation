@@ -24,41 +24,22 @@ export type HistoryEntry = {
 
 type Props = { floor?: number; glossary?: string; context?: string; roomId?: string };
 
-type SourcePart = {
+/** 批内子句 */
+type SubSeg = {
+  index: number;
   text: string;
-  detectedLang: string;
-  sourceLangCode: LangCode;
+  lang: LangCode;
 };
 
-/** 同一次 ASR final：segmentTs=batchId；parts 的 key = 与后端 segment/translation/TTS 一致的 index */
-type SegmentEntry = {
-  segmentBatchTs: number;
-  parts: Map<number, SourcePart>;
+/** 一个 final batch（segmentTs 相同）：可能含多个子句，各自独立 index */
+type BatchEntry = {
+  segmentTs: number;
+  /** 批内子句，按 index 升序排列 */
+  subSegs: SubSeg[];
+  /** index → lang → 译文 */
+  transByIndex: Map<number, Map<string, string>>;
 };
 
-function batchSortedIndices(parts: Map<number, SourcePart>): number[] {
-  return [...parts.keys()].sort((a, b) => a - b);
-}
-
-/** 与 ListenerView：batch 内任一段为 en/id 则整行源语列按该语展示 */
-function batchPrimarySourceLang(parts: Map<number, SourcePart>): LangCode {
-  const order = batchSortedIndices(parts);
-  for (const i of order) {
-    if (parts.get(i)!.sourceLangCode === "en") return "en";
-  }
-  for (const i of order) {
-    if (parts.get(i)!.sourceLangCode === "id") return "id";
-  }
-  return order.length ? parts.get(order[0]!)!.sourceLangCode : "zh";
-}
-
-function batchSourceConcat(parts: Map<number, SourcePart>): string {
-  return batchSortedIndices(parts)
-    .map((i) => parts.get(i)!.text)
-    .join(" ");
-}
-
-type TranslationMap = Map<number, Map<string, string>>;
 /** 当前段在播放时整行高亮（不按字跟读） */
 function SegmentPlayingText({ text, active }: { text: string; active: boolean }) {
   if (!text) return null;
@@ -212,8 +193,13 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
    * 仅在 stop / start 时清空。
    */
   const [liveTranscript, setLiveTranscript] = useState("");
-  const [segments, setSegments] = useState<SegmentEntry[]>([]);
-  const [translations, setTranslations] = useState<TranslationMap>(new Map());
+  /**
+   * ASR final 句子批次：每个 segmentTs 一个卡片
+   * 一个 batch 可能含多个子句（各自 index），前端拼接展示
+   */
+  const [batches, setBatches] = useState<BatchEntry[]>([]);
+  /** 全局翻译文本：index → lang → text */
+  const [translations, setTranslations] = useState<Map<number, Map<string, string>>>(new Map());
   const [listenLang, _setListenLang] = useState<LangCode>("zh");
   const [playingSegIdx, setPlayingSegIdx] = useState(-1);
 
@@ -343,36 +329,31 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         return;
       }
       const srcCode = canonicalSourceLangFromSegment(ev);
-      console.info("[Panel-SEG] ★ segIdx=%d batchTs=%d srcLang=%s detectedLang=%s text=\"%s\"",
-        segIdx, batchTs, srcCode, ev.detectedLang ?? "?",
-        (ev.text ?? "").slice(0, 60));
+      const text = ev.text ?? "";
+      console.info("[Panel-SEG] ★ segIdx=%d batchTs=%d srcLang=%s text=\"%s\"",
+        segIdx, batchTs, srcCode, text.slice(0, 60));
 
-      setSegments((p) => {
-        const at = p.findIndex((row) => row.segmentBatchTs === batchTs);
-        const part: SourcePart = {
-          text: ev.text ?? "",
-          detectedLang: ev.detectedLang,
-          sourceLangCode: srcCode,
-        };
+      setBatches((prev) => {
+        const at = prev.findIndex((b) => b.segmentTs === batchTs);
+        const sub: SubSeg = { index: segIdx, text, lang: srcCode };
+
         if (at >= 0) {
-          const row = p[at]!;
-          const parts = new Map(row.parts);
-          parts.set(segIdx, part);
-          const next = [...p];
-          next[at] = { segmentBatchTs: batchTs, parts };
+          // 该 batch 已存在：跳过（防重）
+          const batch = prev[at]!;
+          if (batch.subSegs.some((s) => s.index === segIdx)) return prev;
+          const subSegs = [...batch.subSegs, sub].sort((a, b2) => a.index - b2.index);
+          const next = [...prev];
+          next[at] = { ...batch, subSegs };
           return next;
         }
-        const parts = new Map<number, SourcePart>();
-        parts.set(segIdx, part);
-        return [...p, { segmentBatchTs: batchTs, parts }];
+        // 新 batch：追加
+        return [...prev, { segmentTs: batchTs, subSegs: [sub], transByIndex: new Map() }];
       });
-      if (ev.detectedLang) setDetectedLang(srcCode);
 
-      // 追加历史记录（zh→en→id 顺序）
       setHistory((prev) => {
         const entry: HistoryEntry = {
           segIndex: segIdx,
-          sourceByLang: { [srcCode]: ev.text },
+          sourceByLang: { [srcCode]: text },
           transByLang: {},
           ts: Date.now(),
         };
@@ -387,9 +368,10 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         return;
       }
       const tgt = normalizeLangCode(ev.targetLang) ?? ev.targetLang;
-      console.info("[Panel-TRANS] ★ segIdx=%d tgtLang=%s srcLang=%s text=\"%s\"",
-        segIdx, tgt, ev.sourceLang ?? "?",
-        (ev.translatedText ?? "").slice(0, 60));
+      console.info("[Panel-TRANS] ★ segIdx=%d tgtLang=%s text=\"%s\"",
+        segIdx, tgt, (ev.translatedText ?? "").slice(0, 60));
+
+      // 更新全局 translations map
       setTranslations((p) => {
         const n = new Map(p);
         const lm = new Map(n.get(segIdx) ?? []);
@@ -397,7 +379,22 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         n.set(segIdx, lm);
         return n;
       });
-      // 更新历史记录的翻译文本
+
+      // 更新 batches 中对应 batch 的 transByIndex
+      setBatches((prev) => {
+        let changed = false;
+        const n = prev.map((batch) => {
+          if (!batch.subSegs.some((s) => s.index === segIdx)) return batch;
+          changed = true;
+          const transByIndex = new Map(batch.transByIndex);
+          const lm = new Map(transByIndex.get(segIdx) ?? []);
+          lm.set(tgt, ev.translatedText);
+          transByIndex.set(segIdx, lm);
+          return { ...batch, transByIndex };
+        });
+        return changed ? n : prev;
+      });
+
       setHistory((prev) => {
         const hi = prev.findIndex((e) => e.segIndex === segIdx);
         if (hi < 0) return prev;
@@ -410,7 +407,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
     }
   }, []);
 
-  /* ── Auto-scroll（合并行用 data-merged-indices 命中子段号） ── */
+  /* ── Auto-scroll ── */
   useEffect(() => {
     if (playingSegIdx < 0) return;
     const root = bodyRef.current;
@@ -422,10 +419,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
           .split(",")
           .map((s) => parseInt(s, 10))
           .filter((n) => !Number.isNaN(n));
-        if (ids.includes(playingSegIdx)) {
-          el = node;
-          break;
-        }
+        if (ids.includes(playingSegIdx)) { el = node; break; }
       }
     }
     if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -434,11 +428,11 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [segments, partial]);
+  }, [batches, partial]);
 
   useEffect(() => {
-    if (partial || segments.length > 0) setCaptureSilentWarn(false);
-  }, [partial, segments.length]);
+    if (partial || batches.length > 0) setCaptureSilentWarn(false);
+  }, [partial, batches.length]);
 
   /** 运行约 5s 后若捕获流仍几乎全静音，提示检查标签页静音 / 分享源 */
   useEffect(() => {
@@ -458,7 +452,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
 
   /* ── Start recording ── */
   const start = async () => {
-    setErr(null); setPartial(""); partialRef.current = ""; setLiveTranscript(""); setSegments([]); setTranslations(new Map()); setDetectedLang("");
+    setErr(null); setPartial(""); partialRef.current = ""; setLiveTranscript(""); setBatches([]); setTranslations(new Map()); setDetectedLang("");
     setPlayingSegIdx(-1);
     micCumSentRef.current = 0;
 
@@ -687,31 +681,28 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
     setPartial("");
   };
 
-  /** 同 batch 内按 index 升序拼接；源语列对应该 batch 的主源语种 */
-  const getSegTextByLang = (
-    seg: SegmentEntry,
+  /**
+   * 获取 batch 中指定语种的展示文本（跨子句按 index 升序拼接）
+   */
+  const getBatchLine = (
+    batch: BatchEntry,
     lang: LangCode
-  ): { text: string; allPending: boolean; tailPending: boolean } => {
-    const merged = batchSortedIndices(seg.parts);
-    const primary = batchPrimarySourceLang(seg.parts);
-    if (primary === lang) {
-      return { text: batchSourceConcat(seg.parts), allPending: false, tailPending: false };
+  ): { text: string; pending: boolean } => {
+    const sorted = [...batch.subSegs].sort((a, b) => a.index - b.index);
+    // 判断是否源语
+    const isSrc = sorted.some((s) => s.lang === lang);
+    if (isSrc) {
+      return { text: sorted.map((s) => s.text).join(""), pending: false };
     }
+    // 译语列：按 index 顺序拼接翻译
     const parts: string[] = [];
-    for (const idx of merged) {
-      const t = translations.get(idx)?.get(lang);
-      if (t === undefined) {
-        if (parts.length === 0) return { text: "", allPending: true, tailPending: false };
-        const remainingSubSegs = merged.length - parts.length;
-        return {
-          text: parts.join(" "),
-          allPending: false,
-          tailPending: remainingSubSegs > 1,
-        };
-      }
-      parts.push(t);
+    for (const seg of sorted) {
+      const t = batch.transByIndex.get(seg.index)?.get(lang)
+             ?? translations.get(seg.index)?.get(lang);
+      if (t !== undefined) parts.push(t);
+      else return { text: parts.join(""), pending: true };
     }
-    return { text: parts.join(" "), allPending: false, tailPending: false };
+    return { text: parts.join(""), pending: false };
   };
 
   return (
@@ -788,12 +779,12 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
 
         <div className="si-tri-transcript-dock">
           <div className="si-tri-transcript-dock-inner" ref={bodyRef}>
-            {segments.length === 0 && !running && (
+            {batches.length === 0 && !running && (
               <div className="si-tri-empty">
                 点击「开始收音」，在弹窗中选择要识别的标签页或窗口，并勾选分享音频（源语言可为中文、英语或印尼语）
               </div>
             )}
-            {segments.length === 0 && running && !partial && (
+            {batches.length === 0 && running && !partial && (
               <div className="si-tri-empty si-tri-empty--capture-wait">
                 <div>等待语音…</div>
                 {captureSilentWarn && (
@@ -809,33 +800,30 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
                 </ul>
               </div>
             )}
-            {segments.map((seg) => {
-              const merged = batchSortedIndices(seg.parts);
-              const rowActive = merged.includes(playingSegIdx);
+            {batches.map((batch) => {
+              const sorted = [...batch.subSegs].sort((a, b) => a.index - b.index);
+              const headIndex = sorted[0]?.index ?? 0;
+              const mergedIndices = sorted.map((s) => s.index).join(",");
+              const rowActive = sorted.some((s) => s.index === playingSegIdx);
               return (
                 <div
-                  key={merged.join("-")}
-                  data-seg={merged[0]}
-                  data-merged-indices={merged.join(",")}
+                  key={batch.segmentTs}
+                  data-seg={headIndex}
+                  data-merged-indices={mergedIndices}
                   className={`si-tri-block ${rowActive ? "si-tri-block--playing" : ""}`}
                 >
                   {(["zh", "en", "id"] as LangCode[]).map((lang) => {
-                    const { text, allPending, tailPending } = getSegTextByLang(seg, lang);
+                    const { text, pending } = getBatchLine(batch, lang);
                     return (
                       <div key={lang} className="si-tri-block-line">
                         <span className={`si-tri-line-lang-badge si-tri-line-lang-badge--${lang}`} title="本行语种">
                           {LANG_LABELS[lang]}
                         </span>
                         <div className="si-tri-block-line-body">
-                          {allPending ? (
+                          {pending ? (
                             <span className="si-tri-seg-pending">翻译中…</span>
                           ) : (
-                            <>
-                              <SegmentPlayingText text={text} active={rowActive} />
-                              {tailPending ? (
-                                <span className="si-tri-seg-pending si-tri-seg-pending--tail">（后续句翻译中…）</span>
-                              ) : null}
-                            </>
+                            <SegmentPlayingText text={text} active={rowActive} />
                           )}
                         </div>
                       </div>

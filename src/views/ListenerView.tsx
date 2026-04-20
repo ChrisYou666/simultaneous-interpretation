@@ -9,49 +9,18 @@ import {
   type LangCode,
 } from "../lib/asrWs";
 
-/** 同一 segmentTs 内按 index 升序取 key 列表 */
-function sortedIndexKeys<T>(m: Map<number, T>): number[] {
-  return [...m.keys()].sort((a, b) => a - b);
-}
 
-/** 卡片源语展示语种：优先 en/id（减少单段误判 zh 时「同源无需翻译」出现） */
-function batchDisplaySourceLang(sourceByIndex: Map<number, { lang: LangCode }>): LangCode {
-  const order = sortedIndexKeys(sourceByIndex);
-  for (const i of order) {
-    if (sourceByIndex.get(i)!.lang === "en") return "en";
-  }
-  for (const i of order) {
-    if (sourceByIndex.get(i)!.lang === "id") return "id";
-  }
-  return order.length > 0 ? sourceByIndex.get(order[0]!)!.lang : "zh";
-}
+// ── 数据结构：一个 segmentTs = 一个 final batch（含一个或多个子句，各自独立 index）────
+type SubSeg = {
+  index: number;
+  text: string;
+  lang: LangCode;
+};
 
-function joinSourceText(sourceByIndex: Map<number, { text: string }>): string {
-  return sortedIndexKeys(sourceByIndex)
-    .map((i) => sourceByIndex.get(i)!.text)
-    .join(" ");
-}
-
-function joinTransForListen(
-  sourceByIndex: Map<number, unknown>,
-  bySeg: Map<number, string> | undefined,
-): string | undefined {
-  if (!bySeg || bySeg.size === 0) return undefined;
-  const parts: string[] = [];
-  for (const i of sortedIndexKeys(sourceByIndex)) {
-    const t = bySeg.get(i);
-    if (t) parts.push(t);
-  }
-  return parts.length > 0 ? parts.join(" ") : undefined;
-}
-
-// ── 数据结构：一个 segmentTs = 一个 ASR final；index = 段号 ──────────────────
-type SegmentCard = {
-  cardKey: number;
+type BatchEntry = {
   segmentTs: number;
-  /** ASR 段：index → 文本与归一语种 */
-  sourceByIndex: Map<number, { text: string; lang: LangCode }>;
-  /** 目标语 → index → 译文 */
+  subSegs: SubSeg[];
+  /** targetLang → index → 译文 */
   transByLang: Map<string, Map<number, string>>;
 };
 
@@ -78,7 +47,7 @@ function parseAudioFrame(buffer: ArrayBuffer): {
 export function ListenerView() {
   // ── 状态 ────────────────────────────────────────────────────────────────
   const [liveTranscript, setLiveTranscript] = useState("");
-  const [cards, setCards] = useState<SegmentCard[]>([]);
+  const [batches, setBatches] = useState<BatchEntry[]>([]);
   const [listenLang, setListenLang] = useState<LangCode>("zh");
   const [playingSegIdx, setPlayingSegIdx] = useState(-1);
   const [connected, setConnected] = useState(false);
@@ -273,63 +242,52 @@ export function ListenerView() {
       return;
     }
 
-    // ── segment：ASR 原文，isSourceText=true ─────────────────────────────
+    // ── segment：ASR 原文，按 segmentTs 分组 ──────────────────────────────────
     if (ev.event === "segment" && (ev as any).isSourceText === true) {
       const segIdx = coerceSegIndex(ev);
       if (segIdx === null) return;
       const batchTs = (ev as any).segmentTs ?? 0;
       if (batchTs === 0) return;
       const lang = normalizeLangCode((ev as any).detectedLang ?? "zh") as LangCode;
-      const segText = ev.text ?? "";
+      const text = ev.text ?? "";
 
-      setCards((prev) => {
-        const at = prev.findIndex((c) => c.segmentTs === batchTs);
+      setBatches((prev) => {
+        const at = prev.findIndex((b) => b.segmentTs === batchTs);
+        const sub: SubSeg = { index: segIdx, text, lang };
+
         if (at >= 0) {
-          const card = prev[at]!;
-          const sourceByIndex = new Map(card.sourceByIndex);
-          sourceByIndex.set(segIdx, { text: segText, lang });
-          const next = [...prev];
-          next[at] = { ...card, sourceByIndex };
-          return next;
+          const batch = prev[at]!;
+          if (batch.subSegs.some((s) => s.index === segIdx)) return prev;
+          const subSegs = [...batch.subSegs, sub].sort((a, c) => a.index - c.index);
+          return [...prev.slice(0, at), { ...batch, subSegs }, ...prev.slice(at + 1)];
         }
-        const sourceByIndex = new Map<number, { text: string; lang: LangCode }>();
-        sourceByIndex.set(segIdx, { text: segText, lang });
-        return [
-          ...prev,
-          {
-            cardKey: prev.length,
-            segmentTs: batchTs,
-            sourceByIndex,
-            transByLang: new Map(),
-          },
-        ];
+        return [...prev, { segmentTs: batchTs, subSegs: [sub], transByLang: new Map() }];
       });
       setLiveTranscript("");
       setHostPresent(true);
       return;
     }
 
-    // ── translation：译文，isSourceText=false ─────────────────────────────
+    // ── translation ────────────────────────────────────────────────────────────
     if (ev.event === "translation" && (ev as any).isSourceText === false) {
+      const segIdx = coerceSegIndex(ev);
+      if (segIdx === null) return;
       const batchTs = (ev as any).segmentTs ?? 0;
       if (batchTs === 0) return;
       const transText = (ev as any).translatedText ?? "";
       if (!transText) return;
-      const transSegIdx = coerceSegIndex(ev as any);
-      if (transSegIdx === null) return;
       const tgtLang = normalizeLangCode((ev as any).targetLang ?? "zh") ?? "zh";
 
-      setCards((prev) => {
-        const at = prev.findIndex((c) => c.segmentTs === batchTs);
+      setBatches((prev) => {
+        const at = prev.findIndex((b) => b.segmentTs === batchTs);
         if (at < 0) return prev;
-        const card = prev[at]!;
-        const transByLang = new Map(card.transByLang);
+        const batch = prev[at]!;
+        if (!batch.subSegs.some((s) => s.index === segIdx)) return prev;
+        const transByLang = new Map(batch.transByLang);
         const bySeg = new Map(transByLang.get(tgtLang) ?? []);
-        bySeg.set(transSegIdx, transText);
+        bySeg.set(segIdx, transText);
         transByLang.set(tgtLang, bySeg);
-        const next = [...prev];
-        next[at] = { ...card, transByLang };
-        return next;
+        return [...prev.slice(0, at), { ...batch, transByLang }, ...prev.slice(at + 1)];
       });
       return;
     }
@@ -342,20 +300,13 @@ export function ListenerView() {
     if (playingSegIdx < 0) return;
     const root = bodyRef.current;
     if (!root) return;
-    const blocks = root.querySelectorAll(".listener-segment[data-seg-ids]");
-    for (const node of blocks) {
-      const raw = node.getAttribute("data-seg-ids") ?? "";
-      const ids = raw.split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n));
-      if (ids.includes(playingSegIdx)) {
-        node.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-        break;
-      }
-    }
-  }, [playingSegIdx, cards.length]);
+    const el = root.querySelector(`[data-seg="${playingSegIdx}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  }, [playingSegIdx, batches.length]);
 
   // ── 连接房间 ─────────────────────────────────────────────────────────────
   const connectToRoom = useCallback((rid: string, lang: LangCode) => {
-    setCards([]);
+    setBatches([]);
     setPlayingSegIdx(-1);
     setLiveTranscript("");
     setConnected(false);
@@ -439,42 +390,47 @@ export function ListenerView() {
     audioCtxRef.current?.close().catch(() => {});
   }, []);
 
-  // ── 段落卡片渲染 ──────────────────────────────────────────────────────────
-  const segmentItem = (card: SegmentCard) => {
-    const order = sortedIndexKeys(card.sourceByIndex);
-    const sourceLang = batchDisplaySourceLang(card.sourceByIndex);
-    const srcLabel = LANG_LABELS[sourceLang] ?? sourceLang;
-    const sourceText = joinSourceText(card.sourceByIndex);
-    const isSameLang = sourceLang === listenLang;
+  // ── 卡片渲染 ────────────────────────────────────────────────────────────────
+  const batchItem = (batch: BatchEntry) => {
+    const sorted = [...batch.subSegs].sort((a, b) => a.index - b.index);
+    const headIndex = sorted[0]?.index ?? 0;
+    const mergedIndices = sorted.map((s) => s.index).join(",");
+    const rowActive = sorted.some((s) => s.index === playingSegIdx);
 
-    const listenLabel = LANG_LABELS[listenLang];
-    const listenBySeg = card.transByLang.get(listenLang);
-    const listenText = isSameLang
-      ? undefined
-      : joinTransForListen(card.sourceByIndex, listenBySeg);
-    const listenPending = !isSameLang && !listenText;
+    // 源语文本拼接
+    const isSameLang = sorted.some((s) => s.lang === listenLang);
+    const sourceText = sorted.map((s) => s.text).join("");
 
-    const rowActive = order.includes(playingSegIdx);
+    // 译语文本拼接
+    const listenParts: string[] = [];
+    let listenPending = false;
+    for (const seg of sorted) {
+      const t = batch.transByLang.get(listenLang)?.get(seg.index);
+      if (t !== undefined) listenParts.push(t);
+      else { listenPending = true; break; }
+    }
 
     return (
       <div
-        key={card.cardKey}
-        data-seg={order[0]}
-        data-seg-ids={order.join(",")}
+        key={batch.segmentTs}
+        data-seg={headIndex}
+        data-seg-ids={mergedIndices}
         className={`listener-segment ${rowActive ? "listener-segment--playing" : ""}`}
       >
         <div className="listener-seg-source">
-          <span className="listener-seg-lang-badge listener-seg-lang-badge--src">{srcLabel}</span>
+          <span className="listener-seg-lang-badge listener-seg-lang-badge--src">
+            {isSameLang ? LANG_LABELS[sorted.find((s) => s.lang === listenLang)?.lang ?? "zh"] : LANG_LABELS[sorted[0]?.lang ?? "zh"]}
+          </span>
           <span className="listener-seg-source-text">{sourceText}</span>
         </div>
         <div className="listener-seg-source">
-          <span className="listener-seg-lang-badge listener-seg-lang-badge--listen">{listenLabel}</span>
+          <span className="listener-seg-lang-badge listener-seg-lang-badge--listen">{LANG_LABELS[listenLang]}</span>
           {isSameLang ? (
             <span className="listener-seg-source-text" style={{ color: "#9ca3af" }}>同源，不需翻译</span>
           ) : listenPending ? (
             <span className="listener-seg-pending">翻译中…</span>
           ) : (
-            <span className="listener-seg-source-text">{listenText}</span>
+            <span className="listener-seg-source-text">{listenParts.join("")}</span>
           )}
         </div>
       </div>
@@ -749,7 +705,7 @@ export function ListenerView() {
               onClick={() => {
                 wsRef.current?.close();
                 setConnected(false);
-                setCards([]);
+                setBatches([]);
                 setPlayingSegIdx(-1);
                 setLiveTranscript("");
               }}>
@@ -780,7 +736,7 @@ export function ListenerView() {
 
       {/* ── 内容区 ───────────────────────────────────────────────────── */}
       <div className="listener-main">
-        {(!connected || cards.length === 0) ? (
+        {(!connected || batches.length === 0) ? (
           <div className="listener-empty">
             <div className="listener-empty-icon">🎙️</div>
             <div>输入房间号加入会议</div>
@@ -789,7 +745,7 @@ export function ListenerView() {
         ) : (
           <div className="listener-segment-scroll" ref={bodyRef}>
             <div className="listener-segment-list">
-              {cards.map((card) => segmentItem(card))}
+              {batches.map((batch) => batchItem(batch))}
             </div>
           </div>
         )}
