@@ -5,6 +5,7 @@ import com.alibaba.dashscope.audio.asr.translation.TranslationRecognizerRealtime
 import com.alibaba.dashscope.audio.asr.translation.results.TranslationRecognizerResult;
 import com.alibaba.dashscope.common.ResultCallback;
 import com.alibaba.dashscope.exception.NoApiKeyException;
+import com.simultaneousinterpretation.config.DashScopeProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,7 @@ import java.util.function.Consumer;
 public class DashScopeSdkWrapper {
 
     private static final Logger log = LoggerFactory.getLogger(DashScopeSdkWrapper.class);
+    private final DashScopeProperties dashScopeProperties;
 
     // sessionId → SdkInstance 映射
     private final Map<String, SdkInstance> instances = new ConcurrentHashMap<>();
@@ -38,6 +40,10 @@ public class DashScopeSdkWrapper {
     // 全局统计
     private static final AtomicLong totalFramesSent = new AtomicLong(0);
     private static final AtomicLong totalBytesSent = new AtomicLong(0);
+
+    public DashScopeSdkWrapper(DashScopeProperties dashScopeProperties) {
+        this.dashScopeProperties = dashScopeProperties;
+    }
 
     /**
      * SDK 实例 - 包含详细状态追踪
@@ -112,6 +118,11 @@ public class DashScopeSdkWrapper {
         long translatorCreateStart = System.nanoTime();
         final TranslationRecognizerRealtime translator;
         try {
+            String apiKey = dashScopeProperties.getEffectiveApiKey(null);
+            if (apiKey != null && !apiKey.isBlank()) {
+                System.setProperty("DASHSCOPE_API_KEY", apiKey);
+                log.info("[SDK-START] sessionId={} 已将 API Key 注入系统属性", sessionId);
+            }
             translator = new TranslationRecognizerRealtime();
         } catch (Exception e) {
             log.error("[SDK-START-FAIL] sessionId={} 初始化失败", sessionId, e);

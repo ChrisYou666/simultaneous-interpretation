@@ -95,17 +95,18 @@ final class AsrClientTextOutboundQueue {
             log.warn("[LAT-SEND] sessionId={} session已关闭，跳过发送 event={}", sessionId, eventType);
             continue;
           }
-          // 重试发送，处理 BINARY_PARTIAL_WRITING 等临时错误
+          // 重试发送，处理 *_PARTIAL_WRITING 临时冲突（可能是 IOException 或 RuntimeException）
           for (int retry = 0; retry < 3; retry++) {
             try {
               session.sendMessage(new TextMessage(msg));
               sent = true;
               break;
-            } catch (IOException e) {
-              lastError = e;
+            } catch (Exception e) {
+              lastError = e instanceof IOException ? (IOException) e
+                  : new IOException(e.getMessage(), e);
               String errMsg = e.getMessage();
-              if (errMsg != null && errMsg.contains("BINARY_PARTIAL_WRITING")) {
-                log.warn("[LAT-SEND-RETRY] sessionId={} retry={} 等待BINARY_PARTIAL_WRITING恢复", sessionId, retry);
+              if (errMsg != null && errMsg.contains("PARTIAL_WRITING")) {
+                log.warn("[LAT-SEND-RETRY] sessionId={} retry={} 等待PARTIAL_WRITING恢复: {}", sessionId, retry, errMsg);
                 try {
                   Thread.sleep(20);
                 } catch (InterruptedException ie) {

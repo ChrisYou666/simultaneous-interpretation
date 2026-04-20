@@ -537,12 +537,14 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             return false;
         }
         try {
-            session.sendMessage(new TextMessage(json));
-            log.info("[ASR-SEND-TO-HOST] ★ 成功发送到主持端 roomId={} sessionId={} size={}",
+            // 通过队列发送，避免多线程（tts-*、translateExecutor）与队列消费线程并发写同一 session
+            // 直接调用 session.sendMessage() 会引发 TEXT_PARTIAL_WRITING，导致队列线程死亡
+            AsrClientTextOutboundQueue.enqueue(session, json);
+            log.info("[ASR-SEND-TO-HOST] ★ 已入队到主持端 roomId={} sessionId={} size={}",
                     roomId, session.getId(), json.length());
             return true;
         } catch (IOException e) {
-            log.error("[ASR-SEND-TO-HOST] 发送失败 roomId={}: {}", roomId, e.getMessage());
+            log.error("[ASR-SEND-TO-HOST] 入队失败 roomId={}: {}", roomId, e.getMessage());
             return false;
         }
     }
