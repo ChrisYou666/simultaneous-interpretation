@@ -1,6 +1,5 @@
 package com.simultaneousinterpretation.service;
 
-import com.simultaneousinterpretation.api.dto.ImagePayload;
 import com.simultaneousinterpretation.api.dto.TranslateRequest;
 import com.simultaneousinterpretation.api.dto.TranslateResponse;
 import com.simultaneousinterpretation.common.BizException;
@@ -14,115 +13,237 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.Base64;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * 翻译服务
- * <p>
- * 核心翻译业务逻辑，调用 AI 大模型进行文本翻译
- *
- * @author System
- * @version 1.0.0
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class TranslateService {
 
-    /**
-     * 最大图片数量
-     */
-    private static final int MAX_IMAGES = 8;
+    /** 翻译指令：Qwen-MT 不支持 system message，指令内嵌于 user message */
+    private static final String MT_INSTRUCTION =
+            "You are a professional interpreter. Translate the following {src} text into {tgt}.\n"
+            + "Output only the concise, idiomatic {tgt} translation, no explanation.\n\n";
 
-    /**
-     * 单张图片最大字节数
-     */
-    private static final long MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+    /** 中文目标：不压缩，直接透传 MT 结果 */
+    private static final String COMPRESSION_SYSTEM_PROMPT_SKIP =
+            null; // 占位，代码中直接跳过压缩
 
-    /**
-     * 系统提示词模板
-     */
-    private static final String SYSTEM_PROMPT_TEMPLATE = 
-            "你是专业同声传译助手。只输出译文正文，不要解释、不要加引号或「译文：」等前缀。\n";
+    /** 英语目标：压缩至 60%%~70%%，英语专用提示词 */
+    private static final String COMPRESSION_SYSTEM_PROMPT_EN =
+            "You are a simultaneous interpretation compression model.\n\n"
+            + "Task: Compress the already-translated English text into a concise real-time interpretation version.\n\n"
+            + "【Input Rules】\n"
+            + "- The input text is already in English. Do NOT translate again.\n"
+            + "- Preserve all proper nouns unchanged.\n\n"
+            + "【Compression Rules】\n"
+            + "1. Remove fillers, discourse markers, and conversational phrases.\n"
+            + "2. Remove repetition and non-essential modifiers.\n"
+            + "3. Preserve all key facts and logical relationships.\n"
+            + "4. Keep the original event order.\n\n"
+            + "【Strict Constraints】\n"
+            + "5. Do NOT add any new information.\n"
+            + "6. Do NOT interpret, infer, or summarize.\n"
+            + "7. The following expressions are strictly forbidden:\n"
+            + "   - \"this means\"\n"
+            + "   - \"this shows\"\n"
+            + "   - \"in conclusion\"\n\n"
+            + "【Length Control】\n"
+            + "8. Target: 60%%~70%% of the original length.\n"
+            + "9. Must NOT exceed the original length.\n"
+            + "10. Do NOT lose key facts.\n\n"
+            + "【Style】\n"
+            + "11. Use short sentences (≤15 words).\n"
+            + "12. Split long sentences.\n"
+            + "13. One sentence, one action.\n"
+            + "14. Avoid subordinate clauses and complex grammar.\n\n"
+            + "Output only the compressed text, no explanation.";
+
+    /** 印尼语目标：压缩至 60%%~70%%，印尼语专用提示词（严格约束禁止改写） */
+    private static final String COMPRESSION_SYSTEM_PROMPT_ID =
+            "You are a simultaneous interpretation compression model.\n\n"
+            + "Task: Compress the already-translated Indonesian text into a concise real-time interpretation version.\n\n"
+            + "【Input Rules】\n"
+            + "- The input text is already in Indonesian. Do NOT translate again.\n"
+            + "- Preserve all proper nouns unchanged.\n\n"
+            + "【Strict Constraints (Must Follow)】\n"
+            + "1. Do NOT rephrase or rewrite the original meaning.\n"
+            + "2. Do NOT add any information not present in the input.\n"
+            + "3. Do NOT add explanations, summaries, or conclusions.\n"
+            + "4. Do NOT use emotional or dramatic expressions.\n"
+            + "5. The following words/phrases are strictly forbidden:\n"
+            + "   - \"artinya\" (meaning)\n"
+            + "   - \"intinya\" (in summary)\n"
+            + "   - \"berarti\" (means)\n"
+            + "   - \"ini menunjukkan\" (this shows)\n"
+            + "   - \"jadi\" (so / therefore)\n"
+            + "6. Do not change tone or expression style.\n\n"
+            + "【Compression Rules】\n"
+            + "7. Only deletion is allowed for:\n"
+            + "   - Fillers\n"
+            + "   - Repetition\n"
+            + "   - Weak modifiers\n"
+            + "8. Preserve all facts, actions, and results.\n"
+            + "9. Keep the original order.\n\n"
+            + "【Length Control】\n"
+            + "10. Target: 60%%~70%% of the original length.\n"
+            + "11. Do NOT delete key actions or events.\n\n"
+            + "【Style (Strict)】\n"
+            + "12. Use very simple sentence structures.\n"
+            + "13. One sentence, one action.\n"
+            + "14. Recommended: ≤12 words per sentence.\n"
+            + "15. Avoid descriptive or literary expressions.\n\n"
+            + "【Output Requirements】\n"
+            + "- Output must be objective, direct, and neutral.\n"
+            + "- Do not use narrative style.\n"
+            + "- Do not polish or enhance expressions.\n\n"
+            + "Output only the compressed text, no explanation.";
+
+    /** 内部语言代码 → OpenAI API 语言名称 */
+    private static final Map<String, String> LANG_CODE_MAP;
+    static {
+        var m = new java.util.HashMap<String, String>();
+        m.put("en", "English");
+        m.put("zh", "Chinese");
+        m.put("id", "Indonesian");
+        m.put("ja", "Japanese");
+        m.put("ko", "Korean");
+        m.put("fr", "French");
+        m.put("es", "Spanish");
+        m.put("de", "German");
+        m.put("th", "Thai");
+        m.put("vi", "Vietnamese");
+        m.put("ar", "Arabic");
+        LANG_CODE_MAP = Map.copyOf(m);
+    }
 
     private final DashScopeProperties dashScopeProperties;
     private final AiProperties aiProperties;
     private final LlmIntegration llmIntegration;
-    private final LanguageDetectionService languageDetectionService;
     private final Map<String, String> modelCache = new ConcurrentHashMap<>();
 
     /**
-     * 翻译文本
-     *
-     * @param request 翻译请求
-     * @return 翻译响应
+     * 翻译入口：两步管道 翻译 → 压缩。
      */
     public TranslateResponse translate(TranslateRequest request) {
-        log.info("翻译请求开始，源语言={}, 目标语言={}, 文本长度={}, 启用知识库={}", 
+        return translateThenCompress(request);
+    }
+
+    /**
+     * 两步管道：步骤一 Qwen-MT 忠实翻译 → 步骤二 Qwen3-Max 意译压缩。
+     * 压缩目标：译文长度 / ASR 源文本长度 = 80%% ~ 120%%。
+     */
+    public TranslateResponse translateThenCompress(TranslateRequest request) {
+        log.info("翻译请求开始（两步管道），源语言={}, 目标语言={}, 文本长度={}",
                  request.getSourceLang(), request.getTargetLang(),
-                 request.getSegment() != null ? request.getSegment().length() : 0,
-                 request.isKbEnabled());
+                 request.getSegment() != null ? request.getSegment().length() : 0);
         long startTime = System.currentTimeMillis();
 
         try {
-            // 参数校验
             validateTranslateRequest(request);
 
-            // 获取 API Key
             String apiKey = getEffectiveApiKey();
             if (!StringUtils.hasText(apiKey)) {
-                log.error("翻译失败，API Key 未配置");
-                throw new BizException(ErrorCode.TRANSLATE_SERVICE_UNAVAILABLE, 
-                        "未配置翻译 API Key，请在配置中设置");
+                throw new BizException(ErrorCode.TRANSLATE_SERVICE_UNAVAILABLE, "未配置翻译 API Key");
             }
 
-            // 获取 Base URL
             String baseUrl = getEffectiveBaseUrl();
+            String srcText = request.getSegment().trim();
+            int srcLen = srcText.length();
+            String srcLangName = toLangName(request.getSourceLang());
+            String tgtLangName = toLangName(request.getTargetLang());
+            String mtModel = getEffectiveModel();
+            String compModel = dashScopeProperties.getCompressionModel();
 
-            // 获取模型名称
-            String modelName = getEffectiveModel();
+            // ── 步骤一：Qwen-MT 翻译 ───────────────────────────────────────
+            long mtStart = System.currentTimeMillis();
+            String mtUserMessage = buildMTUserMessage(srcText, srcLangName, tgtLangName);
+            String mtResult = llmIntegration.chatForTranslation(
+                    mtUserMessage, apiKey, baseUrl, mtModel, srcLangName, tgtLangName);
+            long mtMs = System.currentTimeMillis() - mtStart;
+            if (mtResult == null || mtResult.isBlank()) {
+                throw new BizException(ErrorCode.TRANSLATE_FAILED, "Qwen-MT 翻译返回为空");
+            }
+            int mtLen = mtResult.trim().length();
+            log.info("[PIPE-a-XLAT] model={} srcLen={} mtLen={} ratio={}%% ms={} text={}",
+                     mtModel, srcLen, mtLen,
+                     srcLen > 0 ? String.format("%.1f", (double) mtLen / srcLen * 100) : "0",
+                     mtMs, truncate(srcText, 40));
 
-            // 验证图片
-            validateImages(request.getImages());
-
-            boolean usedImages = request.getImages() != null && !request.getImages().isEmpty();
-            boolean usedMeeting = request.isKbEnabled() && StringUtils.hasText(request.getMeetingMaterialsText());
-
-            // 构建提示词
-            String systemPrompt = buildSystemPrompt(request, usedImages);
-            String userMessage = buildUserMessage(request);
-
-            // 调用 AI 模型
-            String translatedText = llmIntegration.chat(systemPrompt, userMessage, apiKey, baseUrl, modelName);
-
-            if (translatedText == null || translatedText.isBlank()) {
-                log.warn("翻译结果为空，请求参数：源语言={}, 目标语言={}", 
-                         request.getSourceLang(), request.getTargetLang());
-                throw new BizException(ErrorCode.TRANSLATE_FAILED, "翻译结果为空");
+            // ── 步骤二：按目标语言决定是否压缩 ───────────────────────────────
+            String compSystem;
+            boolean doCompress;
+            switch (request.getTargetLang()) {
+                case "zh" -> {
+                    // 中文目标：不压缩
+                    doCompress = false;
+                    compSystem = null;
+                    log.info("[PIPE-b-SKIP] targetLang=zh, 跳过压缩，直接透传 MT 结果");
+                }
+                case "id" -> {
+                    // 印尼语目标：压缩至 60%%~70%%
+                    doCompress = true;
+                    compSystem = COMPRESSION_SYSTEM_PROMPT_ID;
+                    log.info("[PIPE-b-COMP] targetLang=id, 压缩目标 60%%~70%%");
+                }
+                default -> {
+                    // 英语及其他：压缩至 60%%~70%
+                    doCompress = true;
+                    compSystem = COMPRESSION_SYSTEM_PROMPT_EN;
+                    log.info("[PIPE-b-COMP] targetLang={}, 压缩目标 60%%~70%%", request.getTargetLang());
+                }
             }
 
-            long elapsedTime = System.currentTimeMillis() - startTime;
-            log.info("翻译成功，源语言={}, 目标语言={}, 译文长度={}, 耗时={}ms", 
-                     request.getSourceLang(), request.getTargetLang(),
-                     translatedText.length(), elapsedTime);
+            String finalText;
+            String finalModel;
+            int finalLen;
+            double compRatio;
+            if (!doCompress) {
+                finalText = mtResult.trim();
+                finalModel = mtModel;
+                finalLen = mtLen;
+                compRatio = srcLen > 0 ? (double) mtLen / srcLen : 0;
+            } else {
+                long compStart = System.currentTimeMillis();
+                String compUser = mtResult.trim();
+                String compResult = llmIntegration.chat(compSystem, compUser, apiKey, baseUrl, compModel);
+                long compMs = System.currentTimeMillis() - compStart;
 
-            return new TranslateResponse(translatedText.trim(), modelName, usedImages, usedMeeting);
+                if (compResult == null || compResult.isBlank()) {
+                    log.warn("[PIPE-b-COMP-FAIL] 回退 MT 结果");
+                    finalText = mtResult.trim();
+                    finalModel = mtModel;
+                    finalLen = mtLen;
+                    compRatio = srcLen > 0 ? (double) mtLen / srcLen : 0;
+                } else {
+                    finalText = compResult.trim();
+                    finalModel = compModel;
+                    finalLen = finalText.length();
+                    compRatio = srcLen > 0 ? (double) finalLen / srcLen : 0;
+                    log.info("[PIPE-b-COMP] model={} mtLen={} compLen={} compRatio={}%% ms={}",
+                             compModel, mtLen, finalLen,
+                             String.format("%.1f", compRatio * 100), compMs);
+                }
+            }
+
+            long totalMs = System.currentTimeMillis() - startTime;
+            log.info("[PIPE-COMBINED] totalMs={} srcLen={} finalLen={} finalRatio={}%%",
+                     totalMs, srcLen, finalLen,
+                     String.format("%.1f", srcLen > 0 ? (double) finalLen / srcLen * 100 : 0));
+
+            return new TranslateResponse(finalText, finalModel, false, false, compRatio);
+
         } catch (BizException e) {
             throw e;
         } catch (Exception e) {
             long elapsedTime = System.currentTimeMillis() - startTime;
-            log.error("翻译异常，源语言={}, 目标语言={}, 耗时={}ms, error={}", 
+            log.error("翻译异常 源={} 目标={} 耗时={}ms error={}",
                      request.getSourceLang(), request.getTargetLang(), elapsedTime, e.getMessage(), e);
             throw new BizException(ErrorCode.TRANSLATE_FAILED, "翻译服务调用失败: " + e.getMessage());
         }
     }
 
-    /**
-     * 校验翻译请求
-     */
     private void validateTranslateRequest(TranslateRequest request) {
         if (request == null) {
             throw new BizException(ErrorCode.PARAM_MISSING, "翻译请求不能为空");
@@ -131,120 +252,49 @@ public class TranslateService {
             throw new BizException(ErrorCode.TRANSLATE_TEXT_EMPTY);
         }
         if (request.getSegment().length() > Constants.MAX_TRANSLATE_TEXT_LENGTH) {
-            log.warn("翻译文本过长，长度={}, 最大长度={}", 
-                     request.getSegment().length(), Constants.MAX_TRANSLATE_TEXT_LENGTH);
-            throw new BizException(ErrorCode.TRANSLATE_TEXT_TOO_LONG, 
-                    String.format("翻译文本不能超过 %d 个字符", Constants.MAX_TRANSLATE_TEXT_LENGTH));
+            throw new BizException(ErrorCode.TRANSLATE_TEXT_TOO_LONG,
+                    "翻译文本不能超过 " + Constants.MAX_TRANSLATE_TEXT_LENGTH + " 个字符");
         }
         if (!StringUtils.hasText(request.getTargetLang())) {
             throw new BizException(ErrorCode.PARAM_MISSING, "目标语言不能为空");
         }
     }
 
-    /**
-     * 校验图片
-     */
-    private void validateImages(List<ImagePayload> images) {
-        if (images == null || images.isEmpty()) {
-            return;
-        }
-        if (images.size() > MAX_IMAGES) {
-            log.warn("图片数量超限，数量={}, 最大={}", images.size(), MAX_IMAGES);
-            throw new BizException(ErrorCode.IMAGE_COUNT_EXCEEDED, 
-                    String.format("单次最多上传 %d 张图片", MAX_IMAGES));
-        }
-        for (ImagePayload img : images) {
-            if (img == null) {
-                throw new BizException(ErrorCode.PARAM_EMPTY, "图片数据不能为空");
-            }
-            if (!StringUtils.hasText(img.base64()) || !StringUtils.hasText(img.mimeType())) {
-                throw new BizException(ErrorCode.PARAM_FORMAT_ERROR, "图片需包含 mimeType 与 base64");
-            }
-            try {
-                byte[] raw = Base64.getDecoder().decode(img.base64().trim());
-                if (raw.length > MAX_IMAGE_BYTES) {
-                    log.warn("图片过大，大小={}bytes, 最大={}bytes", raw.length, MAX_IMAGE_BYTES);
-                    throw new BizException(ErrorCode.IMAGE_TOO_LARGE, 
-                            String.format("单张图片不能超过 %d MB", MAX_IMAGE_BYTES / 1024 / 1024));
-                }
-            } catch (IllegalArgumentException e) {
-                throw new BizException(ErrorCode.PARAM_FORMAT_ERROR, "图片 Base64 无效");
-            }
-        }
+    private String buildMTUserMessage(String srcText, String srcLangName, String tgtLangName) {
+        return MT_INSTRUCTION
+                .replace("{src}", srcLangName)
+                .replace("{tgt}", tgtLangName) + srcText;
     }
 
-    /**
-     * 构建系统提示词
-     */
-    private String buildSystemPrompt(TranslateRequest request, boolean hasImages) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(SYSTEM_PROMPT_TEMPLATE);
-
-        if (request.isKbEnabled()) {
-            if (StringUtils.hasText(request.getKeywordsText())) {
-                sb.append("\n【术语 / 关键词表】\n").append(request.getKeywordsText().trim()).append('\n');
-            }
-            if (StringUtils.hasText(request.getContextText())) {
-                sb.append("\n【场景与背景】\n").append(request.getContextText().trim()).append('\n');
-            }
-            if (StringUtils.hasText(request.getMeetingMaterialsText())) {
-                sb.append("\n【会议材料（含 PDF 抽取文本；可能截断）】\n")
-                  .append(request.getMeetingMaterialsText().trim())
-                  .append('\n');
-            }
-        } else {
-            sb.append("\n（知识库未启用：未注入术语表、手写上下文与会议报告文本。）\n");
-        }
-
-        if (hasImages) {
-            sb.append("\n【图像】用户附上了与参会人员/身份相关的图片。若图中可见姓名、职务、机构、胸牌文字等，请在译文中与术语表及会议材料保持一致并避免误译人名。\n");
-        }
-
-        return sb.toString();
+    private String toLangName(String code) {
+        if (code == null) return "auto";
+        String name = LANG_CODE_MAP.get(code.toLowerCase());
+        return name != null ? name : code;
     }
 
-    /**
-     * 构建用户消息
-     */
-    private String buildUserMessage(TranslateRequest request) {
-        String src = StringUtils.hasText(request.getSourceLang()) ? request.getSourceLang() : "auto";
-        String tgt = StringUtils.hasText(request.getTargetLang()) ? request.getTargetLang() : Constants.LANG_ZH;
-        
-        return String.format("请将下面片段从 %s 译为 %s，语气适合会议口译现场。原文：\n%s",
-                src, tgt, request.getSegment().trim());
-    }
-
-    /**
-     * 获取有效的 API Key
-     */
     private String getEffectiveApiKey() {
         return dashScopeProperties.getEffectiveApiKey(aiProperties.getApiKey());
     }
 
-    /**
-     * 获取有效的 Base URL
-     */
     private String getEffectiveBaseUrl() {
         String baseUrl = !dashScopeProperties.getTranslateBaseUrl().isBlank()
                 ? dashScopeProperties.getTranslateBaseUrl().trim()
                 : (aiProperties.getBaseUrl() != null ? aiProperties.getBaseUrl().trim() : "");
-        
         if (!StringUtils.hasText(baseUrl)) {
             baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
         }
         return baseUrl;
     }
 
-    /**
-     * 获取有效的模型名称
-     */
     private String getEffectiveModel() {
         String model = !dashScopeProperties.getTranslateModel().isBlank()
                 ? dashScopeProperties.getTranslateModel().trim()
-                : (StringUtils.hasText(aiProperties.getModel()) ? aiProperties.getModel().trim() : "qwen-turbo");
-        
-        // 缓存模型名称
-        modelCache.putIfAbsent("model", model);
+                : (StringUtils.hasText(aiProperties.getModel()) ? aiProperties.getModel().trim() : "qwen-mt-plus");
         return model;
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) return "";
+        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
     }
 }

@@ -26,8 +26,12 @@ public class DashScopeProperties {
 
   // ─── 翻译（OpenAI 兼容 HTTP，供 TranslateService 使用）──────────────────
 
-  private String translateModel = "qwen-turbo";
+  private String translateModel = "qwen-mt-plus";
   private String translateBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+
+  // ─── 意译压缩（步骤二）────────────────────────────────────────────────
+
+  private String compressionModel = "qwen3-max";
 
   // ─── 工具方法 ─────────────────────────────────────────────────────────────
 
@@ -58,4 +62,7 @@ public class DashScopeProperties {
 
   public String getTranslateBaseUrl() { return translateBaseUrl; }
   public void setTranslateBaseUrl(String translateBaseUrl) { this.translateBaseUrl = translateBaseUrl; }
+
+  public String getCompressionModel() { return compressionModel; }
+  public void setCompressionModel(String compressionModel) { this.compressionModel = compressionModel; }
 }

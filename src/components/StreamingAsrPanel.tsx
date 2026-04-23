@@ -694,12 +694,12 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
     if (isSrc) {
       return { text: sorted.map((s) => s.text).join(""), pending: false };
     }
-    // 译语列：按 index 顺序拼接翻译
+    // 译语列：按 index 顺序拼接翻译（空字符串也算有效翻译，正常拼接）
     const parts: string[] = [];
     for (const seg of sorted) {
       const t = batch.transByIndex.get(seg.index)?.get(lang)
              ?? translations.get(seg.index)?.get(lang);
-      if (t !== undefined) parts.push(t);
+      if (t !== undefined && t !== null) parts.push(t);
       else return { text: parts.join(""), pending: true };
     }
     return { text: parts.join(""), pending: false };

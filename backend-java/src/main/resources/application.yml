@@ -30,9 +30,11 @@ app:
     asr-ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
     asr-sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
     asr-semantic-punctuation: false
-    # 翻译（供 TranslateService HTTP 试译使用）
-    translate-model: ${OPENAI_MODEL:qwen-flash}
-    translate-base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    # 翻译（供 TranslateService 两步管道使用）
+    translate-model: ${DASHSCOPE_TRANSLATE_MODEL:qwen-mt-plus}
+    translate-base-url: ${DASHSCOPE_TRANSLATE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    # 压缩模型（两步管道步骤二，用于意译压缩）
+    compression-model: ${DASHSCOPE_COMPRESSION_MODEL:qwen3-max}
 
   jwt:
     secret: ${JWT_SECRET:si-dev-secret-change-in-production-min-32-chars!!}

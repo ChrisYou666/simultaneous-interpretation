@@ -18,7 +18,7 @@ import com.simultaneousinterpretation.meeting.RoomSegmentRegistry;
 import com.simultaneousinterpretation.meeting.RoomWebSocketHandler;
 import com.simultaneousinterpretation.service.LanguageDetectionService;
 import com.simultaneousinterpretation.service.TtsConnectionPool;
-import com.simultaneousinterpretation.service.AiTranslateService;
+import com.simultaneousinterpretation.service.TranslateService;
 import com.simultaneousinterpretation.api.dto.TranslateRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,7 +76,7 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     private final RoomSegmentRegistry segmentRegistry;
     private final LanguageDetectionService languageDetectionService;
     private final TtsConnectionPool ttsConnectionPool;
-    private final AiTranslateService translateService;
+    private final TranslateService translateService;
     private final TtsProperties ttsProperties;
     private final DashScopeProperties dashScopeProperties;
 
@@ -106,7 +106,7 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             RoomSegmentRegistry segmentRegistry,
             LanguageDetectionService languageDetectionService,
             TtsConnectionPool ttsConnectionPool,
-            AiTranslateService translateService,
+            TranslateService translateService,
             TtsProperties ttsProperties,
             DashScopeProperties dashScopeProperties) {
         this.asrProperties = asrProperties;
@@ -258,28 +258,32 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             log.debug("[ASR] sessionId={} 发送 segment 失败", sessionId, e);
         }
 
-        // [PIPE-1] ASR final 文本已就绪，准备触发流水线
-        log.info("[PIPE-1] segIdx={} lang={} textLen={} langDetectMs={}ms text=\"{}\" wallMs={}",
-                segIdx, detectedLang, text.length(), langDetectMs, truncate(text, 40), serverTs);
+        // [PIPE-1] ASR final 文本已就绪 → [PIPE-2] 触发三路并行
+        log.info("[PIPE-1] segIdx={} lang={} textLen={} langDetectMs={}ms text=\"{}\"",
+                segIdx, detectedLang, text.length(), langDetectMs, truncate(text, 40));
 
         if (roomId != null && segIdx >= 0) {
             final String finalLang = detectedLang;
             final int finalSegIdx = segIdx;
-            log.info("[PIPE-2] segIdx={} sourceLang={} roomId={} wallMs={}",
-                    finalSegIdx, finalLang, roomId, System.currentTimeMillis());
+            log.info("[PIPE-2] segIdx={} sourceLang={} roomId={}", finalSegIdx, finalLang, roomId);
             triggerTranslationAndTts(text, finalLang, finalSegIdx, serverTs, roomId, floor);
         }
     }
 
     /**
-     * 触发翻译和 TTS（连接池 + streamingCallAsFlowable 流式发送）。
-     *
-     * <p>每种语言的 TTS 任务提交到该语言专属的单线程执行器 {@link #langExecutors}，
-     * 保证同一语言的音频帧永远串行发送，彻底消除"两段音频同时播放"问题。
+     * 三路并行处理流水线：
+     * <ol>
+     *   <li>源语言 TTS（直接送 TTS，无翻译）</li>
+     *   <li>目标语言A：翻译 → 压缩 → 广播translation事件 → TTS</li>
+     *   <li>目标语言B：翻译 → 压缩 → 广播translation事件 → TTS</li>
+     * </ol>
+     * 源语言 segment 事件已在 {@link #handleSdkResult} 中广播。
      */
     private void triggerTranslationAndTts(String text, String sourceLang, int segIdx,
-                                          long segmentTs, String roomId, int floor) {
-        // ── 源语链：直接 TTS（提交到源语的专属执行器） ────────────────────
+                                         long segmentTs, String roomId, int floor) {
+        int srcLen = text.length();
+
+        // ── 源语链：直接 TTS ─────────────────────────────────────────────
         ExecutorService srcExec = langExecutors.getOrDefault(sourceLang, translateExecutor);
         srcExec.submit(() -> {
             TtsConnectionPool.Lang poolLang = toPoolLang(sourceLang);
@@ -289,27 +293,20 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
                 doTts(synthesizer, buildTtsParam(sourceLang), text, segIdx, sourceLang, roomId);
                 roomWebSocketHandler.broadcastFramedAudioEnd(roomId, segIdx, sourceLang);
             } catch (Exception e) {
-                log.error("[TTS-SOURCE] segIdx={} lang={} error={}", segIdx, sourceLang, e.getMessage());
+                log.error("[TTS-SRC] segIdx={} lang={} error={}", segIdx, sourceLang, e.getMessage());
             } finally {
                 if (synthesizer != null) ttsConnectionPool.returnObject(poolLang, synthesizer);
             }
         });
 
-        // ── 目标语链：翻译（translateExecutor 并行）→ TTS（langExecutor 串行）──
-        System.out.println("[PIPE-2-DEBUG] segIdx=" + segIdx + " sourceLang=" + sourceLang + " ALL_LANGS=" + ALL_LANGS + " will translate to:");
+        // ── 目标语链：翻译 → 压缩 → 广播 → TTS（三路并行） ───────────────
         for (String targetLang : ALL_LANGS) {
-            if (targetLang.equals(sourceLang)) {
-                System.out.println("[PIPE-2-DEBUG]   skip " + targetLang + " (same as source)");
-                continue;
-            }
-            System.out.println("[PIPE-2-DEBUG]   will translate to: " + targetLang);
+            if (targetLang.equals(sourceLang)) continue;
 
             final String tgt = targetLang;
             ExecutorService tgtExec = langExecutors.getOrDefault(tgt, translateExecutor);
 
-            // 翻译在通用线程池并行执行，完成后把 TTS 任务提交到目标语专属执行器
             CompletableFuture.supplyAsync(() -> {
-                System.out.println("[PIPE-3-START] segIdx=" + segIdx + " translating from " + sourceLang + " to " + tgt);
                 TranslateRequest req = new TranslateRequest();
                 req.setSegment(text);
                 req.setSourceLang(sourceLang);
@@ -318,24 +315,26 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
 
                 long xlStart = System.currentTimeMillis();
                 try {
-                    String translated = translateService.translate(req).translation();
+                    var resp = translateService.translate(req);
+                    String translated = resp.translation();
                     long xlMs = System.currentTimeMillis() - xlStart;
                     if (translated == null || translated.isBlank()) {
-                        log.warn("[PIPE-3-XLAT-EMPTY] segIdx={} tgt={} durationMs={}", segIdx, tgt, xlMs);
+                        log.warn("[PIPE-XLAT-EMPTY] segIdx={} tgt={}", segIdx, tgt);
                         return null;
                     }
-                    System.out.println("[PIPE-3-XLAT-DONE] segIdx=" + segIdx + " tgt=" + tgt + " durationMs=" + xlMs + " textLen=" + translated.length() + " translated=" + translated.substring(0, Math.min(50, translated.length())));
-                    log.info("[PIPE-3-XLAT-DONE] segIdx={} tgt={} durationMs={} textLen={}",
-                            segIdx, tgt, xlMs, translated.length());
-                    return translated;
+                    log.info("[PIPE-XLAT] segIdx={} tgt={} xlMs={} len={} ratio={}",
+                             segIdx, tgt, xlMs, translated.length(),
+                             String.format("%.2f", resp.compressionRatio()));
+                    return new Object[] { translated, resp.compressionRatio() };
                 } catch (Exception e) {
-                    System.out.println("[PIPE-3-XLAT-ERROR] segIdx=" + segIdx + " tgt=" + tgt + " error=" + e.getMessage());
-                    log.error("[PIPE-3-XLAT-ERROR] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage());
+                    log.error("[PIPE-XLAT-ERR] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage());
                     return null;
                 }
-            }, translateExecutor).thenAcceptAsync(translated -> {
-                if (translated == null) return;
-                broadcastTranslation(roomId, segIdx, text, translated, sourceLang, tgt, floor, segmentTs);
+            }, translateExecutor).thenAcceptAsync((Object[] result) -> {
+                if (result == null) return;
+                String translated = (String) result[0];
+                double compRatio = (Double) result[1];
+                broadcastTranslation(roomId, segIdx, text, translated, sourceLang, tgt, floor, segmentTs, compRatio);
 
                 TtsConnectionPool.Lang poolLang = toPoolLang(tgt);
                 SpeechSynthesizer synthesizer = null;
@@ -344,11 +343,11 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
                     doTts(synthesizer, buildTtsParam(tgt), translated, segIdx, tgt, roomId);
                     roomWebSocketHandler.broadcastFramedAudioEnd(roomId, segIdx, tgt);
                 } catch (Exception e) {
-                    log.error("[PIPE-3-TTS] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage());
+                    log.error("[PIPE-TTS] segIdx={} tgt={} error={}", segIdx, tgt, e.getMessage());
                 } finally {
                     if (synthesizer != null) ttsConnectionPool.returnObject(poolLang, synthesizer);
                 }
-            }, tgtExec);  // TTS 和广播在目标语专属单线程执行器上执行
+            }, tgtExec);
         }
     }
 
@@ -406,7 +405,7 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
 
     private void broadcastTranslation(String roomId, int segIdx, String sourceText,
                                      String translatedText, String sourceLang, String targetLang,
-                                     int floor, long segmentTs) {
+                                     int floor, long segmentTs, double compressionRatio) {
         try {
             Map<String, Object> ev = new HashMap<>();
             ev.put("event", "translation");
@@ -420,6 +419,7 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             ev.put("detectedLang", targetLang);
             ev.put("textRole", "translation");
             ev.put("isSourceText", false);
+            ev.put("compressionRatio", compressionRatio);
             ev.put("floor", floor);
             ev.put("segmentTs", segmentTs);
             ev.put("serverTs", System.currentTimeMillis());
@@ -428,7 +428,7 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
             sendToHost(roomId, evJson);
             roomWebSocketHandler.broadcastJsonToAll(roomId, evJson);
         } catch (JsonProcessingException e) {
-            log.error("[PIPE-3-BROADCAST-ERR] segIdx={} tgt={} error={}", segIdx, targetLang, e.getMessage());
+            log.error("[BROADCAST-ERR] segIdx={} tgt={} error={}", segIdx, targetLang, e.getMessage());
         }
     }
 
