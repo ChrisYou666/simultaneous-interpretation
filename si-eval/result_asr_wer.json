@@ -1,0 +1,86 @@
+{
+  "results": [
+    {
+      "wav": "zh_01.wav",
+      "lang": "zh",
+      "reference": "欢迎各位出席今天的年度股东大会",
+      "hypothesis": "欢迎各位出席今天的年度股东大会",
+      "wer": 0.0,
+      "cer": 0.0,
+      "mock": true
+    },
+    {
+      "wav": "zh_02.wav",
+      "lang": "zh",
+      "reference": "本季度营收同比增长百分之十五",
+      "hypothesis": "本季度营收同比增长百分之十五",
+      "wer": 10.0,
+      "cer": 0.0,
+      "mock": true
+    },
+    {
+      "wav": "zh_03.wav",
+      "lang": "zh",
+      "reference": "数字化转型是我们未来三年的核心战略",
+      "hypothesis": "数字化转型是我们未来三年的核心战略",
+      "wer": 0.0,
+      "cer": 0.0,
+      "mock": true
+    },
+    {
+      "wav": "en_01.wav",
+      "lang": "en",
+      "reference": "The board of directors has approved the new investment strategy",
+      "hypothesis": "The board of directors has approved the new investment strategy",
+      "wer": 0.0,
+      "cer": 0.0,
+      "mock": true
+    },
+    {
+      "wav": "en_02.wav",
+      "lang": "en",
+      "reference": "Our subsidiary reported a twenty percent increase in revenue",
+      "hypothesis": "Our subsidiary reported a twenty percent increase in revenue",
+      "wer": 0.0,
+      "cer": 0.0,
+      "mock": true
+    },
+    {
+      "wav": "id_01.wav",
+      "lang": "id",
+      "reference": "Kami ingin menyampaikan laporan keuangan triwulan ketiga",
+      "hypothesis": "Kami ingin menyampaikan laporan keuangan triwulan ketiga",
+      "wer": 0.0,
+      "cer": 0.0,
+      "mock": true
+    },
+    {
+      "wav": "id_02.wav",
+      "lang": "id",
+      "reference": "Pertumbuhan ekonomi Indonesia diperkirakan mencapai lima persen",
+      "hypothesis": "Pertumbuhan ekonomi Indonesia diperkirakan mencapai lima persen",
+      "wer": 5.0,
+      "cer": 0.0,
+      "mock": true
+    }
+  ],
+  "by_lang": {
+    "zh": {
+      "avg_wer": 3.33,
+      "avg_cer": null,
+      "count": 3
+    },
+    "en": {
+      "avg_wer": null,
+      "avg_cer": null,
+      "count": 2
+    },
+    "id": {
+      "avg_wer": 2.5,
+      "avg_cer": null,
+      "count": 2
+    }
+  },
+  "overall_avg_wer": 2.14,
+  "mock": true
+}

@@ -1,0 +1,296 @@
+{
+  "timestamp": "2026-04-21T15:05:38.960284",
+  "api_url": null,
+  "is_mock": true,
+  "threshold": 98.0,
+  "overall_pass_rate": 83.33,
+  "pass_rate_meets_threshold": false,
+  "glossary": [
+    {
+      "source": "AI",
+      "target": "人工智能"
+    },
+    {
+      "source": "machine learning",
+      "target": "机器学习"
+    },
+    {
+      "source": "deep learning",
+      "target": "深度学习"
+    },
+    {
+      "source": "neural network",
+      "target": "神经网络"
+    },
+    {
+      "source": "natural language processing",
+      "target": "自然语言处理"
+    },
+    {
+      "source": "NLP",
+      "target": "自然语言处理"
+    },
+    {
+      "source": "transformer",
+      "target": "Transformer"
+    },
+    {
+      "source": "computer vision",
+      "target": "计算机视觉"
+    },
+    {
+      "source": "data science",
+      "target": "数据科学"
+    },
+    {
+      "source": "algorithm",
+      "target": "算法"
+    },
+    {
+      "source": "artificial intelligence",
+      "target": "人工智能"
+    },
+    {
+      "source": "big data",
+      "target": "大数据"
+    },
+    {
+      "source": "cloud computing",
+      "target": "云计算"
+    },
+    {
+      "source": "edge computing",
+      "target": "边缘计算"
+    },
+    {
+      "source": "reinforcement learning",
+      "target": "强化学习"
+    },
+    {
+      "source": "supervised learning",
+      "target": "监督学习"
+    },
+    {
+      "source": "unsupervised learning",
+      "target": "无监督学习"
+    },
+    {
+      "source": "convolutional neural network",
+      "target": "卷积神经网络"
+    },
+    {
+      "source": "recurrent neural network",
+      "target": "循环神经网络"
+    },
+    {
+      "source": "generative AI",
+      "target": "生成式AI"
+    }
+  ],
+  "sentence_results": [
+    {
+      "source": "AI is transforming the way we work and live",
+      "translation": "人工智能正在改变我们的工作和生活方式",
+      "direction": "en-zh",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "人工智能",
+          "found": true,
+          "position": 0
+        }
+      ]
+    },
+    {
+      "source": "Machine learning requires large amounts of training data",
+      "translation": "机器学习需要大量的训练数据",
+      "direction": "en-zh",
+      "all_terms_found": false,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "机器学习",
+          "found": true,
+          "position": 0
+        },
+        {
+          "term": "AI",
+          "expected": "人工智能",
+          "found": false,
+          "position": null
+        }
+      ]
+    },
+    {
+      "source": "Deep learning has revolutionized natural language processing",
+      "translation": "深度学习革新了自然语言处理",
+      "direction": "en-zh",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "深度学习",
+          "found": true,
+          "position": 0
+        },
+        {
+          "term": "",
+          "expected": "自然语言处理",
+          "found": true,
+          "position": 7
+        }
+      ]
+    },
+    {
+      "source": "Neural network architectures continue to evolve",
+      "translation": "神经网络架构持续发展",
+      "direction": "en-zh",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "神经网络",
+          "found": true,
+          "position": 0
+        }
+      ]
+    },
+    {
+      "source": "Computer vision applications are expanding rapidly",
+      "translation": "计算机视觉应用正在快速扩展",
+      "direction": "en-zh",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "计算机视觉",
+          "found": true,
+          "position": 0
+        }
+      ]
+    },
+    {
+      "source": "人工智能技术正在快速发展",
+      "translation": "AI technology is developing rapidly",
+      "direction": "zh-en",
+      "all_terms_found": false,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "AI",
+          "found": true,
+          "position": 0
+        },
+        {
+          "term": "",
+          "expected": "artificial intelligence",
+          "found": false,
+          "position": null
+        }
+      ]
+    },
+    {
+      "source": "机器学习是深度学习的基础",
+      "translation": "Machine learning is the foundation of deep learning",
+      "direction": "zh-en",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "machine learning",
+          "found": true,
+          "position": 0
+        },
+        {
+          "term": "",
+          "expected": "deep learning",
+          "found": true,
+          "position": 38
+        }
+      ]
+    },
+    {
+      "source": "自然语言处理使计算机能够理解文本",
+      "translation": "Natural language processing enables computers to understand text",
+      "direction": "zh-en",
+      "all_terms_found": false,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "natural language processing",
+          "found": true,
+          "position": 0
+        },
+        {
+          "term": "",
+          "expected": "NLP",
+          "found": false,
+          "position": null
+        }
+      ]
+    },
+    {
+      "source": "神经网络在图像识别中表现出色",
+      "translation": "Neural networks perform excellently in image recognition",
+      "direction": "zh-en",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "neural network",
+          "found": true,
+          "position": 0
+        }
+      ]
+    },
+    {
+      "source": "Transformer模型在NLP任务中取得了突破性进展",
+      "translation": "Transformer models have achieved breakthrough progress in NLP tasks",
+      "direction": "zh-en",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "Transformer",
+          "found": true,
+          "position": 0
+        },
+        {
+          "term": "Transformer",
+          "expected": "transformer",
+          "found": true,
+          "position": 0
+        }
+      ]
+    },
+    {
+      "source": "Kecerdasan buatan mengubah cara kita bekerja",
+      "translation": "人工智能正在改变我们的工作方式",
+      "direction": "id-zh",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "人工智能",
+          "found": true,
+          "position": 0
+        }
+      ]
+    },
+    {
+      "source": "Pembelajaran mesin sangat penting dalam analisis data",
+      "translation": "机器学习在数据分析中非常重要",
+      "direction": "id-zh",
+      "all_terms_found": true,
+      "term_checks": [
+        {
+          "term": "",
+          "expected": "机器学习",
+          "found": true,
+          "position": 0
+        }
+      ]
+    }
+  ]
+}

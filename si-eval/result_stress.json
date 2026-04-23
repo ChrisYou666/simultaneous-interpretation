@@ -1,0 +1,62 @@
+{
+  "levels": [
+    {
+      "concurrency": 2,
+      "total": 100,
+      "success": 95,
+      "success_rate_pct": 95.64,
+      "latency_ms": {
+        "p50": 1518.1,
+        "p95": 2429.0,
+        "p99": 2561.7,
+        "avg": 1518.6
+      },
+      "wall_time_s": 22.66,
+      "pass": false,
+      "criteria": {
+        "success_rate": 100.0,
+        "p95_latency_ms": 5000
+      },
+      "mock": true
+    },
+    {
+      "concurrency": 4,
+      "total": 100,
+      "success": 95,
+      "success_rate_pct": 95.93,
+      "latency_ms": {
+        "p50": 1434.1,
+        "p95": 2243.2,
+        "p99": 2905.8,
+        "avg": 1444.9
+      },
+      "wall_time_s": 19.42,
+      "pass": true,
+      "criteria": {
+        "success_rate": 95.0,
+        "p95_latency_ms": 8000
+      },
+      "mock": true
+    },
+    {
+      "concurrency": 8,
+      "total": 100,
+      "success": 98,
+      "success_rate_pct": 98.44,
+      "latency_ms": {
+        "p50": 1499.7,
+        "p95": 2376.9,
+        "p99": 2919.1,
+        "avg": 1485.0
+      },
+      "wall_time_s": 25.74,
+      "pass": true,
+      "criteria": {
+        "success_rate": 90.0,
+        "p95_latency_ms": 15000
+      },
+      "mock": true
+    }
+  ],
+  "all_pass": false
+}

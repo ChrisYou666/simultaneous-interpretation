@@ -80,7 +80,7 @@ export function ListenerView() {
   const SPEED_UP_THRESHOLD_S = 3;   // 积压超过 3 秒才加速（收紧条件）
   const SPEED_DOWN_THRESHOLD_S = 1.5; // 积压低于 1.5 秒开始减速（更敏感）
   const MIN_RATE = 1.0;
-  const MAX_RATE = 1.5;            // 限制最大倍速，避免过快（从2.0降到1.5）
+  const MAX_RATE = 1.25;           // 限制最大倍速，避免过快
   const RATE_STEP_UP = 0.008;      // 加速步长稍小
   const RATE_STEP_DOWN = 0.02;     // 减速步长更大，快速恢复
   const RATE_ADJUST_INTERVAL_MS = 500; // 每 500ms 检查一次

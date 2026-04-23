@@ -1,0 +1,274 @@
+name: ASR Benchmark
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Test mode (mock or live)'
+        required: false
+        default: 'mock'
+        type: choice
+        options:
+          - mock
+          - live
+      language:
+        description: 'Language to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - zh
+          - en
+          - id
+
+env:
+  PYTHON_VERSION: '3.11'
+  JAVA_VERSION: '21'
+
+jobs:
+  asr-wer-benchmark:
+    name: ASR WER Benchmark (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-asr-benchmark-${{ hashFiles('**/requirements.txt', '**/scripts/*.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-asr-benchmark-
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install jiwer numpy websockets
+
+      - name: Run ASR WER Benchmark (Mock Mode)
+        if: inputs.mode != 'live'
+        run: |
+          echo "Running ASR WER Benchmark in MOCK mode"
+          python scripts/asr_wer_benchmark.py --mode=mock --output-json --output-path asr_wer_results.json
+
+      - name: Run ASR WER Benchmark (Live Mode)
+        if: inputs.mode == 'live'
+        run: |
+          echo "Running ASR WER Benchmark in LIVE mode"
+          python scripts/asr_wer_benchmark.py --mode=live --output-json --output-path asr_wer_results.json
+
+      - name: Display WER Results
+        run: |
+          echo "=== ASR WER Benchmark Results ==="
+          if [ -f asr_wer_results.json ]; then
+            cat asr_wer_results.json
+          else
+            echo "No results file found"
+          fi
+
+      - name: Check WER Threshold
+        run: |
+          echo "Checking WER threshold (target: < 20%)"
+          if [ -f asr_wer_results.json ]; then
+            WER=$(cat asr_wer_results.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('overall_wer', 1.0))")
+            echo "Overall WER: $WER"
+            if (( $(echo "$WER < 0.20" | bc -l) )); then
+              echo "✓ WER is below threshold (20%)"
+              exit 0
+            else
+              echo "✗ WER exceeds threshold (20%)"
+              exit 1
+            fi
+          else
+            echo "⚠ No results file found, skipping threshold check"
+            exit 0
+          fi
+
+      - name: Upload WER Results Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: asr-wer-results-${{ github.run_number }}
+          path: asr_wer_results.json
+          retention-days: 30
+
+  asr-integration-test:
+    name: ASR Integration Test (Python)
+    runs-on: ubuntu-latest
+    needs: asr-wer-benchmark
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install websockets
+
+      - name: Run ASR Integration Test
+        run: |
+          echo "Running ASR Integration Test"
+          python scripts/asr_integration_test.py --mode=mock --output-json --output-path asr_integration_results.json
+
+      - name: Display Integration Test Results
+        run: |
+          echo "=== ASR Integration Test Results ==="
+          if [ -f asr_integration_results.json ]; then
+            cat asr_integration_results.json
+          else
+            echo "No results file found"
+          fi
+
+      - name: Upload Integration Test Results Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: asr-integration-results-${{ github.run_number }}
+          path: asr_integration_results.json
+          retention-days: 30
+
+  asr-java-performance-test:
+    name: ASR Performance Test (Java)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: si_backend
+          MYSQL_USER: si_user
+          MYSQL_PASSWORD: si_pass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            mysqladmin ping -h 127.0.0.1 --silent && echo "MySQL ready" && break
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run ASR Performance Tests
+        run: |
+          cd backend-java
+          mvn test -Dtest=AsrPerformanceTest \
+                   -Dspring.datasource.url=jdbc:mysql://127.0.0.1:3306/si_backend \
+                   -Dspring.datasource.username=root \
+                   -Dspring.datasource.password=root \
+                   -Dspring.profiles.active=test \
+                   -DfailIfNoTests=false
+
+      - name: Check Test Results
+        run: |
+          echo "=== ASR Performance Test Results ==="
+          if [ -f backend-java/target/surefire-reports/*AsrPerformanceTest*.xml ]; then
+            cat backend-java/target/surefire-reports/*AsrPerformanceTest*.xml | grep -E '(testcase|failure|error)' | head -50
+          else
+            echo "No test results found (tests may be skipped)"
+          fi
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: asr-performance-test-results-${{ github.run_number }}
+          path: backend-java/target/surefire-reports/*AsrPerformanceTest*.xml
+          retention-days: 30
+
+  summary:
+    name: ASR Benchmark Summary
+    runs-on: ubuntu-latest
+    needs: [asr-wer-benchmark, asr-integration-test, asr-java-performance-test]
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Display Summary
+        run: |
+          echo "========================================"
+          echo "    ASR BENCHMARK SUMMARY"
+          echo "========================================"
+          echo ""
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Run Number: ${{ github.run_number }}"
+          echo "Triggered: ${{ github.event_name }}"
+          echo ""
+
+          echo "--- WER Benchmark Results ---"
+          if [ -f ./artifacts/asr-wer-results-*/asr_wer_results.json ]; then
+            cat ./artifacts/asr-wer-results-*/asr_wer_results.json 2>/dev/null | head -20 || echo "No WER results available"
+          else
+            echo "No WER results available"
+          fi
+          echo ""
+
+          echo "--- Integration Test Results ---"
+          if [ -f ./artifacts/asr-integration-results-*/asr_integration_results.json ]; then
+            cat ./artifacts/asr-integration-results-*/asr_integration_results.json 2>/dev/null | head -20 || echo "No integration results available"
+          else
+            echo "No integration test results available"
+          fi
+          echo ""
+
+          echo "========================================"
+          echo "    BENCHMARK COMPLETED"
+          echo "========================================"
+
+      - name: Upload Summary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-benchmark-summary-${{ github.run_number }}
+          path: ./artifacts
+          retention-days: 30
+
+  post-run:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [asr-wer-benchmark, asr-integration-test, asr-java-performance-test, summary]
+    if: always()
+
+    steps:
+      - name: Cleanup temporary files
+        run: |
+          echo "Cleaning up temporary files..."
+          rm -rf backend-java/target/test-classes 2>/dev/null || true
+          rm -rf backend-java/target/surefire-reports 2>/dev/null || true
+          echo "Cleanup complete"

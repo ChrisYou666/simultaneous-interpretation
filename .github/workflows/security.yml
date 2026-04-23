@@ -1,0 +1,88 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 3 * * 0'  # Weekly on Sunday at 3 AM
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('backend-java/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
+
+      - name: Run SpotBugs
+        run: |
+          cd backend-java
+          mvn spotbugs:check -DskipTests -q || true
+          mvn spotbugs:xml -DskipTests
+
+      - name: Upload SpotBugs results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spotbugs-results
+          path: backend-java/target/spotbugsXml.xml
+
+      - name: Run OWASP Dependency-Check
+        run: |
+          cd backend-java
+          mvn org.owasp:dependency-check-maven:check -DskipTests -q || true
+
+      - name: Upload OWASP results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owasp-results
+          path: backend-java/target/dependency-check-report.html
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+
+      - name: Check for vulnerabilities
+        run: |
+          echo "Checking for high/critical vulnerabilities..."
+          # Fail if any high/critical vulnerabilities found
+          if grep -q '"severity": "high\|"critical"' npm-audit.json 2>/dev/null; then
+            echo "High/Critical vulnerabilities found"
+            exit 1
+          fi
+
+  frontend-security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate

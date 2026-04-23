@@ -1,0 +1,207 @@
+name: Translation Quality Benchmark
+
+on:
+  schedule:
+    # Run weekly on Monday at 2 AM UTC
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Translation API URL (e.g., https://your-api.com/api/v1/ai/translate)'
+        required: false
+        type: string
+      test_mode:
+        description: 'Test mode (mock or live)'
+        required: false
+        type: choice
+        default: 'mock'
+        options:
+          - mock
+          - live
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'scripts/translation_benchmark.py'
+      - 'scripts/term_consistency_test.py'
+      - 'scripts/report_metrics.py'
+      - '.github/workflows/benchmark.yml'
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  benchmark:
+    name: Translation Quality Benchmark
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-benchmark-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-benchmark-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install sacrebleu bert-score transformers torch matplotlib
+
+      - name: Run translation benchmark (Mock mode)
+        if: inputs.test_mode == 'mock' || github.event_name == 'schedule'
+        run: |
+          cd scripts
+          python translation_benchmark.py --output ../benchmark-results.json --skip-mock-warning
+        continue-on-error: true
+
+      - name: Run translation benchmark (Live API)
+        if: inputs.test_mode == 'live' && inputs.api_url != ''
+        env:
+          API_URL: ${{ inputs.api_url }}
+        run: |
+          cd scripts
+          python translation_benchmark.py --api-url "$API_URL" --output ../benchmark-results.json
+        continue-on-error: true
+
+      - name: Run term consistency test (Mock mode)
+        if: inputs.test_mode == 'mock' || github.event_name == 'schedule'
+        run: |
+          cd scripts
+          python term_consistency_test.py --output ../term-consistency-results.json --skip-mock-warning
+        continue-on-error: true
+
+      - name: Run term consistency test (Live API)
+        if: inputs.test_mode == 'live' && inputs.api_url != ''
+        env:
+          API_URL: ${{ inputs.api_url }}
+        run: |
+          cd scripts
+          python term_consistency_test.py --api-url "$API_URL" --output ../term-consistency-results.json
+        continue-on-error: true
+
+      - name: Generate metrics report
+        run: |
+          cd scripts
+          python report_metrics.py --input ../benchmark-results.json \
+            --output-md ../BENCHMARK-REPORT.md \
+            --output-chart ../benchmark-chart.png
+        continue-on-error: true
+
+      - name: Archive benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark-results.json
+            term-consistency-results.json
+            BENCHMARK-REPORT.md
+            benchmark-chart.png
+          retention-days: 30
+
+      - name: Comment benchmark results on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const results = JSON.parse(fs.readFileSync('benchmark-results.json', 'utf8'));
+              const overall = results.overall_metrics || {};
+              const thresholds = results.thresholds || {};
+
+              const body = `
+              ## Translation Quality Benchmark Results
+
+              **Timestamp:** ${results.timestamp || 'N/A'}
+              **Mode:** ${results.is_mock ? 'Mock' : 'Live API'}
+
+              ### Overall Metrics
+              | Metric | Value | Threshold | Status |
+              |--------|-------|-----------|--------|
+              | BLEU Score | ${(overall.bleu_average || 0).toFixed(2)} | >= ${thresholds.bleu_min || 15} | ${(overall.bleu_average || 0) >= (thresholds.bleu_min || 15) ? '✅' : '❌'} |
+              | BERTScore F1 | ${(overall.bert_f1_average || 0).toFixed(4)} | >= ${thresholds.bert_f1_min || 0.85} | ${(overall.bert_f1_average || 0) >= (thresholds.bert_f1_min || 0.85) ? '✅' : '❌'} |
+              | Term Consistency | ${(overall.term_consistency_rate || 0).toFixed(2)}% | >= ${thresholds.term_consistency_min || 98}% | ${(overall.term_consistency_rate || 0) >= (thresholds.term_consistency_min || 98) ? '✅' : '❌'} |
+
+              ### Per-Direction Results
+              ${(results.direction_results || []).map(r =>
+                `| ${r.direction} | BLEU: ${r.bleu_score.toFixed(2)} | F1: ${r.bert_score_f1.toFixed(4)} | ${r.passed ? '✅' : '❌'} |`
+              ).join('\n')}
+
+              ${results.all_passed ? '**All metrics passed!**' : '**Some metrics did not meet thresholds.**'}
+              `;
+
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            } catch (e) {
+              console.log('Failed to post comment:', e.message);
+            }
+
+      - name: Set benchmark status
+        if: always()
+        run: |
+          if [ -f benchmark-results.json ]; then
+            ALL_PASSED=$(python3 -c "import json; print(json.load(open('benchmark-results.json')).get('all_passed', False))")
+            echo "All benchmark tests passed: $ALL_PASSED"
+            echo "BENCHMARK_PASSED=$ALL_PASSED" >> $GITHUB_OUTPUT
+          else
+            echo "No benchmark results found"
+            echo "BENCHMARK_PASSED=false" >> $GITHUB_OUTPUT
+          fi
+
+  benchmark-summary:
+    name: Benchmark Summary
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+          path: .
+        continue-on-error: true
+
+      - name: Display summary
+        run: |
+          if [ -f benchmark-results.json ]; then
+            echo "## Translation Benchmark Results"
+            echo ""
+            python3 -c "
+            import json
+            with open('benchmark-results.json') as f:
+                r = json.load(f)
+                overall = r.get('overall_metrics', {})
+                print(f\"- BLEU Score: {overall.get('bleu_average', 0):.2f}\")
+                print(f\"- BERTScore F1: {overall.get('bert_f1_average', 0):.4f}\")
+                print(f\"- Term Consistency: {overall.get('term_consistency_rate', 0):.2f}%\")
+                print(f\"- All Passed: {r.get('all_passed', False)}\")
+            "
+          else
+            echo "No benchmark results available"
+          fi
+
+      - name: Fail if benchmarks failed (on schedule)
+        if: needs.benchmark.result == 'failure' && github.event_name == 'schedule'
+        run: |
+          echo "Benchmark failed. Check the benchmark results artifact for details."
+          exit 1

@@ -1,0 +1,34 @@
+{
+  "overall_bleu": 97.48,
+  "avg_latency_ms": 1507.8,
+  "p95_latency_ms": 2111.0,
+  "error_count": 0,
+  "total": 30,
+  "by_pair": {
+    "zh→en": {
+      "bleu": 77.63,
+      "avg_ms": 1033.8,
+      "success_rate": 100.0
+    },
+    "zh→id": {
+      "bleu": 76.41,
+      "avg_ms": 2096.3,
+      "success_rate": 100.0
+    },
+    "id→zh": {
+      "bleu": 0.0,
+      "avg_ms": 1161.7,
+      "success_rate": 100.0
+    },
+    "id→en": {
+      "bleu": 95.67,
+      "avg_ms": 1017.8,
+      "success_rate": 100.0
+    },
+    "en→zh": {
+      "bleu": 0.0,
+      "avg_ms": 1989.7,
+      "success_rate": 100.0
+    }
+  }
+}

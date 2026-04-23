@@ -1,0 +1,14 @@
+{
+  "total_segments": 200,
+  "translate_success": 196,
+  "translate_error": 4,
+  "success_rate_pct": 98.0,
+  "latency_ms": {
+    "p50": 1808.9,
+    "p95": 2795.2,
+    "avg": 1775.0,
+    "max": 3843.0
+  },
+  "slow_translations_gt3s": 8,
+  "tts_errors": 0
+}
