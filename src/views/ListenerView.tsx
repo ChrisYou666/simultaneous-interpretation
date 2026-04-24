@@ -75,9 +75,6 @@ export function ListenerView() {
   const playbackRateRef = useRef<number>(1.0);
   /** 上次调整语速的时刻（毫秒），避免频繁调整 */
   const lastRateAdjustRef = useRef<number>(0);
-  /** 当前正在播放的 AudioBufferSourceNode 合集，切换语言时用于停止旧音频 */
-  const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-
   // 语速调整阈值配置
   const SPEED_UP_THRESHOLD_S = 3;   // 积压超过 3 秒才加速（收紧条件）
   const SPEED_DOWN_THRESHOLD_S = 1.5; // 积压低于 1.5 秒开始减速（更敏感）
@@ -180,8 +177,6 @@ export function ListenerView() {
       src.buffer = audioBuf;
       src.playbackRate.value = playbackRateRef.current;
       src.connect(masterGainRef.current ?? ctx.destination);
-      activeSourcesRef.current.add(src);
-      src.onended = () => { activeSourcesRef.current.delete(src); };
       src.start(startTime);
 
       // 首帧：用 setTimeout 在音频实际播放时更新 playingSegIdx
@@ -377,23 +372,6 @@ export function ListenerView() {
       setLiveTranscript("");
     };
   }, [getAudioCtx, handleBinaryFrame]);
-
-  // ── 切换语言 ─────────────────────────────────────────────────────────────
-  const setListenLangHandler = useCallback((lang: LangCode) => {
-    setListenLang(lang);
-    listenLangRef.current = lang;
-    // 立即停止所有正在播放的音频（旧语言 + 新语言队列中的旧帧）
-    activeSourcesRef.current.forEach((src) => {
-      try { src.stop(); } catch { /* ignore if already stopped */ }
-    });
-    activeSourcesRef.current.clear();
-    // 重置 PCM 时间轴
-    nextScheduleRef.current = 0;
-    segFirstChunkRef.current.clear();
-    setPlayingSegIdx(-1);
-    // 通知后端更新该听众的收听语言，后端据此过滤后续音频帧
-    wsRef.current?.send(JSON.stringify({ action: "setListenLang", lang }));
-  }, []);
 
   // ── 卸载时关闭 WS ────────────────────────────────────────────────────────
   useEffect(() => () => {
@@ -730,14 +708,6 @@ export function ListenerView() {
               加入房间
             </button>
           )}
-        </div>
-        <div className="lang-selector">
-          <label>收听语言:</label>
-          <select
-            value={listenLang}
-            onChange={(e) => setListenLangHandler(e.target.value as LangCode)}>
-            {ALL_LANGS.map((l) => <option key={l} value={l}>{LANG_LABELS[l]}</option>)}
-          </select>
         </div>
       </div>
 
