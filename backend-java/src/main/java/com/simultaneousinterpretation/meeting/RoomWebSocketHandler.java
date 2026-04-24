@@ -103,7 +103,32 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
 
   @Override
   protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-    // 纯音频模式下，不处理文本消息
+    String payload = message.getPayload();
+    if (payload == null || payload.isBlank()) return;
+
+    SessionInfo info = sessionInfoMap.get(session.getId());
+    if (info == null) return;
+
+    try {
+      JsonNode root = objectMapper.readTree(payload);
+      String action = root.path("action").asText("");
+
+      if ("setListenLang".equals(action)) {
+        String lang = root.path("lang").asText("").trim().toLowerCase();
+        if (Set.of("zh", "en", "id").contains(lang)) {
+          info.listenLang = lang;
+          log.info("[房间WS] 听众切换语言 sessionId={} user={} listenLang={}",
+              session.getId(), info.userId, lang);
+          sendToSession(session, Map.of(
+              "event", "listen_lang_changed",
+              "listenLang", lang,
+              "serverTs", System.currentTimeMillis()
+          ));
+        }
+      }
+    } catch (Exception e) {
+      log.debug("[房间WS] 文本消息解析失败: {}", e.getMessage());
+    }
   }
 
   @Override
@@ -277,25 +302,22 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     Set<WebSocketSession> listeners = listenerSessions.get(roomId);
     if (listeners == null || listeners.isEmpty()) return;
 
-    // 从帧头解析 segIdx 和类型用于日志
-    ByteBuffer buf = ByteBuffer.wrap(frame);
+    // 从帧头解析 segIdx 和类型用于日志（不改变原 buffer 状态）
+    ByteBuffer frameCopy = ByteBuffer.wrap(frame).slice();
     int segIdx = -1;
     int sentenceIdx = -1;
     String frameType = "UNKNOWN";
     try {
-      segIdx = buf.getInt();
-      // 检查帧格式：legacy (4+1+1+lang) vs new (4+4+1+1+lang)
-      if (frame.length >= 9 && buf.remaining() > 0) {
-        // 可能是新格式：尝试读取 sentenceIdx
-        int savedPos = buf.position();
-        int maybeSentenceIdx = buf.getInt();
-        if (buf.remaining() > 0) {
-          byte type = buf.get();
+      segIdx = frameCopy.getInt();
+      if (frame.length >= 9 && frameCopy.remaining() > 0) {
+        int savedPos = frameCopy.position();
+        int maybeSentenceIdx = frameCopy.getInt();
+        if (frameCopy.remaining() > 0) {
+          byte type = frameCopy.get();
           sentenceIdx = maybeSentenceIdx;
           frameType = (type == (byte) 0x03) ? "END" : "CHUNK";
         } else {
-          // legacy 格式，回退
-          buf.position(savedPos);
+          frameCopy.position(savedPos);
           frameType = (frame.length >= 5 && frame[4] == (byte) 0x03) ? "END" : "CHUNK";
         }
       } else {
@@ -306,6 +328,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     }
 
     ByteBuffer sendBuf = ByteBuffer.wrap(frame);
+    sendBuf.position(0);
     int sent = 0;
     int skippedLangMismatch = 0;
     for (WebSocketSession s : listeners) {

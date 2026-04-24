@@ -222,6 +222,12 @@ export type AsrServerEvent =
       seq: number;
       serverTs?: number;
     }
+  | {
+      /** 服务器确认听众切换收听语言 */
+      event: "listen_lang_changed";
+      listenLang: string;
+      serverTs?: number;
+    }
   | { event: "error"; message?: string; code?: string; detail?: string };
 
 export type AsrServerMessage = AsrServerEvent;
