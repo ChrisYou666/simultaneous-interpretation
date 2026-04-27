@@ -1,0 +1,96 @@
+# 运行目录下可查看 logs/si-backend.log
+logging:
+  file:
+    name: logs/si-backend.log
+  level:
+    root: INFO
+    com.simultaneousinterpretation: INFO
+
+spring:
+  application:
+    name: si-backend
+  codec:
+    max-in-memory-size: 52MB
+
+server:
+  port: ${SERVER_PORT:8100}
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  tomcat:
+    max-http-form-post-size: 52MB
+    max-swallow-size: 10MB
+  error:
+    include-message: always
+    include-binding-errors: always
+
+app:
+  dashscope:
+    api-key: ${DASHSCOPE_API_KEY:sk-f2259f641b804b7981106869b41f1239}
+    # ASR：gummy-realtime-v1 支持中/英/印尼三语自动检测
+    asr-model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
+    asr-ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
+    asr-sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
+    asr-semantic-punctuation: false
+    # 翻译（供 TranslateService 两步管道使用）
+    translate-model: ${DASHSCOPE_TRANSLATE_MODEL:qwen-mt-plus}
+    translate-base-url: ${DASHSCOPE_TRANSLATE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    # 压缩模型（两步管道步骤二，用于意译压缩）
+    compression-model: ${DASHSCOPE_COMPRESSION_MODEL:qwen3-max}
+
+  jwt:
+    secret: ${JWT_SECRET:si-dev-secret-change-in-production-min-32-chars!!}
+    expiration-hours: ${JWT_EXPIRATION_HOURS:72}
+
+  openai:
+    api-key: ${OPENAI_API_KEY:${DASHSCOPE_API_KEY:}}
+    base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    model: ${OPENAI_MODEL:qwen-flash}
+
+  asr:
+    provider: ${ASR_PROVIDER:dashscope}
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:sk-f2259f641b804b7981106869b41f1239}
+      ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
+      model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
+      sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
+      format: pcm
+      semantic-punctuation-enabled: false
+    deepgram:
+      api-key: ${DEEPGRAM_API_KEY:}
+      model: ${DEEPGRAM_MODEL:nova-2}
+      sample-rate: ${DEEPGRAM_ASR_SAMPLE_RATE:48000}
+      interim-results: true
+      detect-language: true
+    openai:
+      api-key: ${OPENAI_ASR_API_KEY:${OPENAI_API_KEY:}}
+      base-url: ${OPENAI_ASR_BASE_URL:https://api.openai.com/v1}
+      model: ${OPENAI_ASR_MODEL:gpt-4o-transcribe}
+      sample-rate: ${OPENAI_ASR_SAMPLE_RATE:24000}
+      language: ${OPENAI_ASR_LANGUAGE:}
+      vad-enabled: true
+      vad-prefix-padding-ms: 300
+      vad-suffix-padding-ms: 300
+      vad-threshold: 0.5
+
+  # TTS：CosyVoice 流式合成，三语分别配置音色
+  tts:
+    api-key: ${TTS_API_KEY:${DASHSCOPE_API_KEY:}}
+    model: ${TTS_MODEL:cosyvoice-v3-flash}
+    voice-zh: ${TTS_VOICE_ZH:longanyang}
+    voice-en: ${TTS_VOICE_EN:longanhuan}
+    voice-id: ${TTS_VOICE_ID:loongindah_v3}
+    sample-rate: ${TTS_SAMPLE_RATE:24000}
+
+  # ASR 调参（支持运行时 /api/tuning/params 动态修改）
+  tuning:
+    asr-provider: ${ASR_PROVIDER:dashscope}
+    dashscope-ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
+    dashscope-model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
+    dashscope-sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
+    dashscope-semantic-punctuation: false
+    deepgram-sample-rate: ${DEEPGRAM_ASR_SAMPLE_RATE:48000}
+    deepgram-model: ${DEEPGRAM_MODEL:nova-2}
+
+  # 语言检测：bigram 评分，zh/en/id 三语，默认启用
+  lang-detect:
+    enabled: ${LANG_DETECT_ENABLED:true}
+    confidence-threshold: ${LANG_DETECT_CONFIDENCE_THRESHOLD:0.2}

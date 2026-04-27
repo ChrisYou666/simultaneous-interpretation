@@ -1,0 +1,118 @@
+# ============================================
+# 同声传译系统 - Docker Compose 配置
+# ============================================
+# 完整服务：MySQL + 后端 + 前端Nginx
+# 使用：docker-compose -f docker-compose.yml up -d
+# ============================================
+
+version: '3.8'
+
+services:
+  # ============================================
+  # MySQL 数据库
+  # ============================================
+  mysql:
+    image: mysql:8.0
+    container_name: si-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-si_root_2024}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-si_assistant}
+      MYSQL_USER: ${MYSQL_USER:-si_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-si_password_2024}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # 后端服务（Spring Boot）
+  # ============================================
+  backend:
+    build:
+      context: .
+      dockerfile: backend-java/Dockerfile
+    image: si-backend:latest
+    container_name: si-backend
+    restart: unless-stopped
+    ports:
+      - "8100:8100"
+    environment:
+      # Spring Boot配置
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SERVER_PORT: 8100
+
+      # MySQL数据库配置
+      MYSQL_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-si_assistant}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      MYSQL_USER: ${MYSQL_USER:-si_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-si_password_2024}
+
+      # 阿里云百炼API（必填）
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-your_api_key_here}
+
+      # JWT配置（生产环境请修改）
+      JWT_SECRET: ${JWT_SECRET:-prod-secret-change-this-at-least-32-chars!!}
+      JWT_EXPIRATION_HOURS: ${JWT_EXPIRATION_HOURS:-72}
+
+      # ASR配置
+      ASR_PROVIDER: ${ASR_PROVIDER:-dashscope}
+      DASHSCOPE_ASR_MODEL: ${DASHSCOPE_ASR_MODEL:-gummy-realtime-v1}
+
+      # 翻译配置
+      TUNING_TRANSLATE_MODEL: ${TUNING_TRANSLATE_MODEL:-qwen-turbo}
+
+      # TTS配置
+      TUNING_TTS_MODEL: ${TUNING_TTS_MODEL:-cosyvoice-v3-flash}
+      TUNING_TTS_VOICE: ${TUNING_TTS_VOICE:-longanyang}
+      # TTS 专用 API Key（与 ASR/翻译隔离，避免 429 限流）
+      TUNING_TTS_API_KEY: ${TUNING_TTS_API_KEY:-}
+
+      # 日志配置
+      LOGGING_LEVEL_ROOT: INFO
+      LOGGING_LEVEL_COM_SIMULTANEOUSINTERPRETATION: INFO
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # ============================================
+  # 前端服务（Nginx）
+  # ============================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: si-frontend:latest
+    container_name: si-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ============================================
+# 数据卷
+# ============================================
+volumes:
+  mysql_data:
+    driver: local
+
+# ============================================
+# 网络
+# ============================================
+networks:
+  default:
+    name: si-network
+    driver: bridge

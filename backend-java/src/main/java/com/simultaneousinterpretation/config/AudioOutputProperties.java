@@ -1,0 +1,47 @@
+package com.simultaneousinterpretation.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+/**
+ * 虚拟音频输出设备配置。
+ *
+ * device-zh/en/id 填写设备名称的关键字（不区分大小写，子串匹配）。
+ * 系统会在所有 javax.sound.sampled Mixer 里找第一个包含该关键字的播放设备。
+ *
+ * VB-Cable 方案（需付费购买 A+B 包）：
+ *   device-zh: "CABLE Input (VB-Audio Virtual Cable)"
+ *   device-en: "CABLE-A Input"
+ *   device-id: "CABLE-B Input"
+ *
+ * VoiceMeeter Potato 方案（完全免费）：
+ *   device-zh: "VoiceMeeter Input"
+ *   device-en: "VoiceMeeter Aux Input"
+ *   device-id: "VoiceMeeter VAIO3 Input"
+ */
+@Component
+@ConfigurationProperties(prefix = "app.audio-output")
+public class AudioOutputProperties {
+
+    private String deviceZh = "";
+    private String deviceEn = "";
+    private String deviceId = "";
+
+    public String getDeviceZh() { return deviceZh; }
+    public void setDeviceZh(String deviceZh) { this.deviceZh = deviceZh; }
+
+    public String getDeviceEn() { return deviceEn; }
+    public void setDeviceEn(String deviceEn) { this.deviceEn = deviceEn; }
+
+    public String getDeviceId() { return deviceId; }
+    public void setDeviceId(String deviceId) { this.deviceId = deviceId; }
+
+    public String getDevice(String lang) {
+        return switch (lang.toLowerCase()) {
+            case "zh" -> deviceZh;
+            case "en" -> deviceEn;
+            case "id" -> deviceId;
+            default -> "";
+        };
+    }
+}

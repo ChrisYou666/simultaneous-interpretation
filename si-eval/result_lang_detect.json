@@ -1,0 +1,410 @@
+{
+  "results": [
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "欢迎各位参加今天的年度股东大会"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "本季度营收同比增长百分之十五"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "数字化转型是我们未来三年的核心战略"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "供应链问题已经基本得到解决"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "感谢大家对公司一直以来的支持与信任"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "请问管理层对于成本控制有什么具体措施"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "我们在东南亚地区的用户增长超出预期"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "下一步我们将重点投入研发和人才培养"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "市场进入策略需要进一步细化"
+    },
+    {
+      "scenario": "纯中文",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "请财务部门尽快提交季度报告"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "The board of directors has approved the new investment strategy"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Our revenue increased by twenty percent this quarter"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "We plan to enter the Indonesian market next year"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Digital transformation is our core strategy for the next three years"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Supply chain issues have been largely resolved"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Thank you all for your continued support and trust"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "User growth in Southeast Asia exceeded expectations"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "The subsidiary reported a significant increase in quarterly revenue"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Carbon neutrality by two thousand and fifty is our commitment"
+    },
+    {
+      "scenario": "纯英文",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Our next focus will be on research and development investment"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Kami ingin menyampaikan laporan keuangan triwulan ketiga"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Pertumbuhan ekonomi Indonesia diperkirakan mencapai lima persen"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Transformasi digital menjadi prioritas utama perusahaan kami"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Investasi di sektor teknologi meningkat secara signifikan"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Program kemitraan ini akan menguntungkan kedua belah pihak"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Kami membutuhkan persetujuan dari dewan direksi"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Selamat datang kepada semua peserta rapat hari ini"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Pendapatan tumbuh lima belas persen secara tahunan"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Rantai pasokan sebagian besar telah terselesaikan"
+    },
+    {
+      "scenario": "纯印尼",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Pertumbuhan pengguna di Asia Tenggara melampaui ekspektasi"
+    },
+    {
+      "scenario": "中英混合",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "我们 use AI 技术 推进数字化"
+    },
+    {
+      "scenario": "中英混合",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "这个 project 很 important 需要尽快完成"
+    },
+    {
+      "scenario": "中英混合",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "请确认一下 budget 是否到位"
+    },
+    {
+      "scenario": "中英混合",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "AI 驱动的 数字化转型 是 our 核心 strategy"
+    },
+    {
+      "scenario": "中英混合",
+      "expected": "zh",
+      "detected": "en",
+      "correct": false,
+      "text": "我们的 KPI 是 user growth 和 revenue"
+    },
+    {
+      "scenario": "中印尼混合",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "欢迎各位出席今天的 rapat 年度股东大会"
+    },
+    {
+      "scenario": "中印尼混合",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "本季度营收增长 signifikan 超出预期"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "好的"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "明白"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "可以"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "收到"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "谢谢"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Yes"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "OK"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "No"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Go"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Ya"
+    },
+    {
+      "scenario": "短文本",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Oke"
+    },
+    {
+      "scenario": "含数字标点",
+      "expected": "zh",
+      "detected": "zh",
+      "correct": true,
+      "text": "本季度营收同比增长15%，超预期"
+    },
+    {
+      "scenario": "含数字标点",
+      "expected": "en",
+      "detected": "en",
+      "correct": true,
+      "text": "Revenue grew 15% year-on-year (Q3 2024)"
+    },
+    {
+      "scenario": "含数字标点",
+      "expected": "id",
+      "detected": "id",
+      "correct": true,
+      "text": "Pertumbuhan 15% secara tahunan, melampaui ekspektasi"
+    }
+  ],
+  "by_scenario": {
+    "纯中文": {
+      "correct": 10,
+      "total": 10,
+      "rate": 100.0,
+      "threshold": "≥ 95%"
+    },
+    "纯英文": {
+      "correct": 10,
+      "total": 10,
+      "rate": 100.0,
+      "threshold": "≥ 95%"
+    },
+    "纯印尼": {
+      "correct": 10,
+      "total": 10,
+      "rate": 100.0,
+      "threshold": "≥ 95%"
+    },
+    "中英混合": {
+      "correct": 4,
+      "total": 5,
+      "rate": 80.0,
+      "threshold": "≥ 80%"
+    },
+    "中印尼混合": {
+      "correct": 2,
+      "total": 2,
+      "rate": 100.0,
+      "threshold": "≥ 80%"
+    },
+    "短文本": {
+      "correct": 11,
+      "total": 11,
+      "rate": 100.0,
+      "threshold": "≥ 70%"
+    },
+    "含数字标点": {
+      "correct": 3,
+      "total": 3,
+      "rate": 100.0,
+      "threshold": "≥ 90%"
+    }
+  },
+  "overall_rate_pct": 98.04,
+  "overall_correct": 50,
+  "overall_total": 51,
+  "all_pass": true,
+  "mock": true
+}

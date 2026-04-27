@@ -1,0 +1,406 @@
+{
+  "timestamp": "2026-04-21T15:06:05.190882",
+  "api_url": null,
+  "is_mock": true,
+  "thresholds": {
+    "bleu_min": 15.0,
+    "bert_f1_min": 0.85,
+    "term_consistency_min": 98.0
+  },
+  "direction_results": [
+    {
+      "direction": "zh-en",
+      "bleu_score": 13.0433,
+      "bert_score_precision": 0.2209,
+      "bert_score_recall": 0.2583,
+      "bert_score_f1": 0.2357,
+      "pair_count": 15,
+      "passed": false
+    },
+    {
+      "direction": "en-zh",
+      "bleu_score": 0.0,
+      "bert_score_precision": 0.0611,
+      "bert_score_recall": 0.0667,
+      "bert_score_f1": 0.0638,
+      "pair_count": 15,
+      "passed": false
+    },
+    {
+      "direction": "id-zh",
+      "bleu_score": 10.0,
+      "bert_score_precision": 0.19,
+      "bert_score_recall": 0.2,
+      "bert_score_f1": 0.1947,
+      "pair_count": 10,
+      "passed": false
+    },
+    {
+      "direction": "zh-en-technical",
+      "bleu_score": 42.6777,
+      "bert_score_precision": 0.4336,
+      "bert_score_recall": 0.5054,
+      "bert_score_f1": 0.4612,
+      "pair_count": 10,
+      "passed": false
+    }
+  ],
+  "overall_metrics": {
+    "bleu_average": 16.4303,
+    "bert_f1_average": 0.2388,
+    "term_consistency_rate": 0.0
+  },
+  "all_passed": false,
+  "pairs": [
+    {
+      "source": "欢迎各位参加今天的会议",
+      "reference": "Welcome to today's meeting everyone",
+      "hypothesis": "Welcome everyone to attend today's conference",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "请大家保持安静",
+      "reference": "Please keep quiet",
+      "hypothesis": "Please keep quiet everyone",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "会议即将开始",
+      "reference": "The meeting is about to begin",
+      "hypothesis": "The conference is about to begin",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "感谢大家的参与",
+      "reference": "Thank you all for your participation",
+      "hypothesis": "Thanks for everyone's participation",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "我们开始今天的议题",
+      "reference": "Let's start today's agenda",
+      "hypothesis": "Let's start today's topic",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "首先，请允许我介绍今天的演讲嘉宾",
+      "reference": "First, please allow me to introduce today's speakers",
+      "hypothesis": "[EN] 首先，请允许我介绍今天的演讲嘉宾... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "下面进入问答环节",
+      "reference": "Now let's move to the Q&A session",
+      "hypothesis": "[EN] 下面进入问答环节... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "感谢各位的精彩演讲",
+      "reference": "Thank you all for your excellent presentations",
+      "hypothesis": "[EN] 感谢各位的精彩演讲... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "会议到此结束",
+      "reference": "This concludes today's meeting",
+      "hypothesis": "[EN] 会议到此结束... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "请各位会后交流",
+      "reference": "Please feel free to network after the meeting",
+      "hypothesis": "[EN] 请各位会后交流... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "我同意这个提议",
+      "reference": "I agree with this proposal",
+      "hypothesis": "[EN] 我同意这个提议... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "请看下一页PPT",
+      "reference": "Please look at the next slide",
+      "hypothesis": "[EN] 请看下一页PPT... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "这个问题问得很好",
+      "reference": "That's an excellent question",
+      "hypothesis": "[EN] 这个问题问得很好... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "我们有十分钟的休息时间",
+      "reference": "We have a ten minute break",
+      "hypothesis": "[EN] 我们有十分钟的休息时间... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "让我们继续讨论",
+      "reference": "Let's continue the discussion",
+      "hypothesis": "[EN] 让我们继续讨论... (mock translation)",
+      "direction": "zh-en",
+      "domain": "general"
+    },
+    {
+      "source": "Good morning everyone, let's begin the meeting",
+      "reference": "大家早上好，让我们开始会议",
+      "hypothesis": "大家早上好，让我们开始会议吧",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "I'd like to thank everyone for coming today",
+      "reference": "感谢各位今天的到来",
+      "hypothesis": "[中文] I'd like t... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Let's move on to the next item on the agenda",
+      "reference": "让我们进入下一个议程",
+      "hypothesis": "[中文] Let's move... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Could you please elaborate on that point",
+      "reference": "请您详细说明一下那个观点",
+      "hypothesis": "[中文] Could you ... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "I have a question regarding the budget",
+      "reference": "我有一个关于预算的问题",
+      "hypothesis": "[中文] I have a q... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Let's table this discussion for now",
+      "reference": "让我们暂时搁置这个讨论",
+      "hypothesis": "[中文] Let's tabl... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "We need to reschedule this meeting",
+      "reference": "我们需要重新安排这次会议",
+      "hypothesis": "[中文] We need to... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "The presentation was very informative",
+      "reference": "这次演讲非常有帮助",
+      "hypothesis": "[中文] The presen... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Please sign the attendance sheet",
+      "reference": "请签到",
+      "hypothesis": "[中文] Please sig... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "The next conference will be held in Shanghai",
+      "reference": "下次会议将在上海举行",
+      "hypothesis": "[中文] The next c... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "I appreciate your feedback",
+      "reference": "感谢您的反馈",
+      "hypothesis": "[中文] I apprecia... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Let's vote on this proposal",
+      "reference": "让我们对这个提案进行投票",
+      "hypothesis": "[中文] Let's vote... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "We have run out of time",
+      "reference": "我们的时间用完了",
+      "hypothesis": "[中文] We have ru... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Please mute your microphone",
+      "reference": "请静音",
+      "hypothesis": "[中文] Please mut... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "The meeting is adjourned",
+      "reference": "会议结束",
+      "hypothesis": "[中文] The meetin... (模拟翻译)",
+      "direction": "en-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Selamat pagi, mari kita mulai diskusi",
+      "reference": "早上好，让我们开始讨论",
+      "hypothesis": "早上好，让我们开始讨论吧",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Terima kasih atas partisipasi Anda",
+      "reference": "感谢您的参与",
+      "hypothesis": "感谢您的参与",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "SilakanAjukan pertanyaan",
+      "reference": "请提问",
+      "hypothesis": "[中文] SilakanAjukan p... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Kita akan istirahat selama sepuluh menit",
+      "reference": "我们将休息十分钟",
+      "hypothesis": "[中文] Kita akan istir... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Presentasi tersebut sangat bermanfaat",
+      "reference": "这次演讲非常有价值",
+      "hypothesis": "[中文] Presentasi ters... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Silakan lanjutkan dengan topik berikutnya",
+      "reference": "请继续下一个主题",
+      "hypothesis": "[中文] Silakan lanjutk... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Saya ingin menambahkan beberapa poin",
+      "reference": "我想补充几点",
+      "hypothesis": "[中文] Saya ingin mena... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Bisakah Anda ulangi pertanyaannya",
+      "reference": "请您重复一下问题",
+      "hypothesis": "[中文] Bisakah Anda ul... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Rapat akan berakhir dalam lima menit",
+      "reference": "会议将在五分钟后结束",
+      "hypothesis": "[中文] Rapat akan bera... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "Sampai jumpa di pertemuan berikutnya",
+      "reference": "下次会议见",
+      "hypothesis": "[中文] Sampai jumpa di... (模拟翻译)",
+      "direction": "id-zh",
+      "domain": "general"
+    },
+    {
+      "source": "人工智能技术正在快速发展",
+      "reference": "AI technology is developing rapidly",
+      "hypothesis": "AI technology is developing rapidly",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "机器学习是人工智能的核心",
+      "reference": "Machine learning is the core of AI",
+      "hypothesis": "Machine learning is the core of artificial intelligence",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "深度学习在图像识别中应用广泛",
+      "reference": "Deep learning is widely used in image recognition",
+      "hypothesis": "Deep learning is widely used in image recognition",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "神经网络可以处理复杂的模式",
+      "reference": "Neural networks can handle complex patterns",
+      "hypothesis": "Neural networks can handle complex patterns",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "自然语言处理使机器理解人类语言",
+      "reference": "NLP enables machines to understand human language",
+      "hypothesis": "Natural language processing enables machines to understand human language",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "The neural network architecture uses transformer models",
+      "reference": "该神经网络架构使用Transformer模型",
+      "hypothesis": "[EN] The neural network a... (mock translation)",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "Machine learning algorithms require large datasets",
+      "reference": "机器学习算法需要大量数据集",
+      "hypothesis": "[EN] Machine learning alg... (mock translation)",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "Deep learning has revolutionized computer vision",
+      "reference": "深度学习革新了计算机视觉领域",
+      "hypothesis": "[EN] Deep learning has re... (mock translation)",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "Natural language processing applications include translation",
+      "reference": "自然语言处理的应用包括翻译",
+      "hypothesis": "[EN] Natural language pro... (mock translation)",
+      "direction": "zh-en",
+      "domain": "technical"
+    },
+    {
+      "source": "AI and machine learning are transforming industries",
+      "reference": "人工智能和机器学习正在改变各行业",
+      "hypothesis": "[EN] AI and machine learn... (mock translation)",
+      "direction": "zh-en",
+      "domain": "technical"
+    }
+  ]
+}

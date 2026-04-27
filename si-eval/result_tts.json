@@ -1,0 +1,60 @@
+{
+  "mos_results": [
+    {
+      "lang": "zh",
+      "text": "欢迎各位出席今天的年度股东大会",
+      "mos": 4.0,
+      "wall_ms": 2699.0,
+      "tts_first_ms": 1010.0,
+      "errors": 0,
+      "mock": true
+    },
+    {
+      "lang": "en",
+      "text": "The board has approved the new investment strategy",
+      "mos": 4.0,
+      "wall_ms": 2362.9,
+      "tts_first_ms": 940.4,
+      "errors": 0,
+      "mock": true
+    },
+    {
+      "lang": "id",
+      "text": "Kami berencana memasuki pasar Indonesia",
+      "mos": 4.0,
+      "wall_ms": 2903.8,
+      "tts_first_ms": 1251.3,
+      "errors": 0,
+      "mock": true
+    },
+    {
+      "lang": "zh",
+      "text": "数字化转型是我们未来三年的核心战略",
+      "mos": 4.0,
+      "wall_ms": 3041.8,
+      "tts_first_ms": 995.9,
+      "errors": 0,
+      "mock": true
+    },
+    {
+      "lang": "en",
+      "text": "Revenue grew fifteen percent year-on-year",
+      "mos": 4.0,
+      "wall_ms": 1812.3,
+      "tts_first_ms": 927.0,
+      "errors": 0,
+      "mock": true
+    }
+  ],
+  "avg_mos": 4.0,
+  "tts_latency_ms": {
+    "p50": 995.9,
+    "p95": 1251.3,
+    "avg": 1024.9
+  },
+  "tts_error_rate_pct": 0.0,
+  "total_errors": 0,
+  "total_requests": 5,
+  "all_pass": true,
+  "mock": true
+}
