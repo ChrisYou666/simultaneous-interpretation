@@ -14,9 +14,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 把 TTS PCM 音频直接写入虚拟音频设备（VoiceMeeter VAIO 或 VB-Cable）。
+ * 把 TTS PCM 音频直接写入 VoiceMeeter 虚拟音频设备。
  *
  * 设备名通过 application.yml app.audio-output.device-zh/en/id 配置，子串匹配。
  * 每种语言独立的 SourceDataLine，保证各语言音频不交叉。
@@ -27,9 +28,9 @@ import java.util.concurrent.TimeUnit;
  * 音频格式：24kHz PCM Signed 16-bit Mono Little-Endian（与 TTS 输出一致）。
  */
 @Service
-public class VbCableAudioOutput {
+public class VoiceMeeterAudioOutput {
 
-    private static final Logger log = LoggerFactory.getLogger(VbCableAudioOutput.class);
+    private static final Logger log = LoggerFactory.getLogger(VoiceMeeterAudioOutput.class);
 
     private static final AudioFormat FORMAT = new AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED,
@@ -64,6 +65,9 @@ public class VbCableAudioOutput {
     /** 是否正在写 TTS 数据（写 TTS 时跳过静音帧，避免竞争） */
     private final Map<String, Boolean> writing = new ConcurrentHashMap<>();
 
+    private final AtomicLong totalWrittenBytes = new AtomicLong(0);
+    private final AtomicLong totalWriteCalls = new AtomicLong(0);
+
     private final ScheduledExecutorService keepAliveExecutor =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "audio-keepalive");
@@ -71,22 +75,53 @@ public class VbCableAudioOutput {
                 return t;
             });
 
-    public VbCableAudioOutput(AudioOutputProperties props) {
+    public VoiceMeeterAudioOutput(AudioOutputProperties props) {
         this.props = props;
         log.info("[AUDIO-OUT] 初始化完成，音频设备配置: zh=\"{}\" en=\"{}\" id=\"{}\"",
                 props.getDevice("zh"), props.getDevice("en"), props.getDevice("id"));
-        // 每 20ms 向所有已打开的 line 写静音帧，保持 Teams 音频流不断流
+        dumpAvailableMixers();
         keepAliveExecutor.scheduleAtFixedRate(this::writeKeepAlive, 100, 20, TimeUnit.MILLISECONDS);
+    }
+
+    /** 启动时打印所有可用的混音器（帮助诊断设备匹配问题） */
+    private void dumpAvailableMixers() {
+        Mixer.Info[] infos = AudioSystem.getMixerInfo();
+        log.info("[AUDIO-OUT] ===== 可用混音器列表（{} 个）=====", infos.length);
+        for (Mixer.Info info : infos) {
+            log.info("[AUDIO-OUT]   Mixer: name=\"{}\" desc=\"{}\"",
+                    info.getName(), info.getDescription());
+        }
+        log.info("[AUDIO-OUT] ===========================================");
     }
 
     /**
      * 写入直通音频（原始说话人声音）。
      * 输入为 16kHz PCM 16-bit mono（ASR 上行格式），上采样至 24kHz 后写入源语言设备。
+     * 非阻塞：TTS 占用通道时跳过本帧，避免阻塞 ASR 音频流导致丢帧。
      */
     public void writePassthrough(String lang, byte[] pcm16k) {
         if (pcm16k == null || pcm16k.length == 0) return;
         byte[] pcm24k = upsample16to24(pcm16k);
-        write(lang, pcm24k);
+        String targetLang = (lang != null && !lang.isBlank()) ? lang : "zh";
+        writeNonBlocking(targetLang, pcm24k);
+    }
+
+    /**
+     * 非阻塞写入：TTS 占用通道时跳过本帧，避免阻塞调用方（ASR 音频帧处理线程）。
+     * 与阻塞 write() 的区别：不在缓冲区满时等，直接丢弃本帧。
+     */
+    private void writeNonBlocking(String lang, byte[] pcm) {
+        if (pcm == null || pcm.length == 0) return;
+        SourceDataLine line = lines.get(lang);
+        if (line == null) return;  // 通道未打开（设备初始化时），静默跳过
+        if (Boolean.TRUE.equals(writing.get(lang))) return;  // TTS 正在写，跳过
+        int freeBytes = line.available();
+        if (freeBytes < pcm.length) return;  // 缓冲区空间不足，跳过本帧（比阻塞更好）
+        int written = line.write(pcm, 0, pcm.length);
+        if (written < pcm.length) {
+            log.warn("[AUDIO-OUT] passthrough lang={} buffer overflow: tried={} wrote={}",
+                    lang, pcm.length, written);
+        }
     }
 
     /** 线性插值上采样：16kHz → 24kHz（ratio = 1.5） */
@@ -110,24 +145,51 @@ public class VbCableAudioOutput {
 
     /** 写入指定语言的 TTS PCM 音频。同一语言的 TTS 线程天然串行，无需额外同步。 */
     public void write(String lang, byte[] pcm) {
-        if (pcm == null || pcm.length == 0) return;
+        if (pcm == null || pcm.length == 0) {
+            log.warn("[AUDIO-OUT] write lang={} skipped: null or empty pcm", lang);
+            return;
+        }
         SourceDataLine line = lines.computeIfAbsent(lang, this::openLine);
-        if (line == null) return;
+        if (line == null) {
+            log.warn("[AUDIO-OUT] write lang={} skipped: line is null (device unavailable)", lang);
+            return;
+        }
         writing.put(lang, true);
         try {
-            line.write(pcm, 0, pcm.length);
+            int written = line.write(pcm, 0, pcm.length);
+            totalWrittenBytes.addAndGet(written);
+            totalWriteCalls.incrementAndGet();
+            if (totalWriteCalls.get() % 50 == 1) {
+                log.info("[AUDIO-OUT] write lang={} bytes={} totalCalls={} totalBytes={}",
+                        lang, pcm.length, totalWriteCalls.get(), totalWrittenBytes.get());
+            }
+        } catch (Exception e) {
+            log.error("[AUDIO-OUT] write lang={} failed: {}", lang, e.getMessage(), e);
         } finally {
             writing.put(lang, false);
         }
     }
 
     private void writeKeepAlive() {
-        lines.forEach((lang, line) -> {
-            if (Boolean.TRUE.equals(writing.get(lang))) return;  // TTS 正在写，跳过
+        if (lines.isEmpty()) return;
+        int totalSilentFrames = 0;
+        for (Map.Entry<String, SourceDataLine> e : lines.entrySet()) {
+            String lang = e.getKey();
+            SourceDataLine line = e.getValue();
+            if (Boolean.TRUE.equals(writing.get(lang))) continue;  // TTS 正在写，跳过
             if (line.isOpen()) {
-                line.write(SILENCE_FRAME, 0, SILENCE_FRAME.length);
+                try {
+                    line.write(SILENCE_FRAME, 0, SILENCE_FRAME.length);
+                    totalSilentFrames++;
+                } catch (Exception ex) {
+                    log.warn("[AUDIO-OUT] keepalive write lang={} failed: {}", lang, ex.getMessage());
+                }
             }
-        });
+        }
+        if (totalSilentFrames > 0 && log.isDebugEnabled()) {
+            log.debug("[AUDIO-OUT] keepalive sent to {} lines, {} active lines={}",
+                    totalSilentFrames, lines.size(), lines.keySet());
+        }
     }
 
     @PreDestroy

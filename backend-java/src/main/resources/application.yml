@@ -94,3 +94,9 @@ app:
   lang-detect:
     enabled: ${LANG_DETECT_ENABLED:true}
     confidence-threshold: ${LANG_DETECT_CONFIDENCE_THRESHOLD:0.2}
+
+  # 虚拟音频输出设备（VoiceMeeter Potato，子串匹配设备名，不区分大小写）
+  audio-output:
+    device-zh: ${AUDIO_OUT_ZH:VoiceMeeter Input}
+    device-en: ${AUDIO_OUT_EN:VoiceMeeter VAIO3 Input}
+    device-id: ${AUDIO_OUT_ID:VoiceMeeter Aux Input}

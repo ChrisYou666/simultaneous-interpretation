@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ALL_LANGS,
   LANG_LABELS,
   coerceSegIndex,
   normalizeLangCode,
@@ -48,7 +47,7 @@ export function ListenerView() {
   // ── 状态 ────────────────────────────────────────────────────────────────
   const [liveTranscript, setLiveTranscript] = useState("");
   const [batches, setBatches] = useState<BatchEntry[]>([]);
-  const [listenLang, setListenLang] = useState<LangCode>("zh");
+  const [listenLang] = useState<LangCode>("zh");
   const [playingSegIdx, setPlayingSegIdx] = useState(-1);
   const [connected, setConnected] = useState(false);
   const [roomId, setRoomId] = useState<string>("");

@@ -9,11 +9,6 @@ import org.springframework.stereotype.Component;
  * device-zh/en/id 填写设备名称的关键字（不区分大小写，子串匹配）。
  * 系统会在所有 javax.sound.sampled Mixer 里找第一个包含该关键字的播放设备。
  *
- * VB-Cable 方案（需付费购买 A+B 包）：
- *   device-zh: "CABLE Input (VB-Audio Virtual Cable)"
- *   device-en: "CABLE-A Input"
- *   device-id: "CABLE-B Input"
- *
  * VoiceMeeter Potato 方案（完全免费）：
  *   device-zh: "VoiceMeeter Input"
  *   device-en: "VoiceMeeter Aux Input"
