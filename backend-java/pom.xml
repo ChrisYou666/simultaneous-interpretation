@@ -107,10 +107,11 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
+
     </plugins>
   </build>
 
-  <!-- 与 run-dev.cmd 中 -Dspring-boot.run.profiles=local 等价：mvn spring-boot:run -Plocal 会加载 application-local.yml -->
+  <!-- 与开发启动脚本等价：mvn spring-boot:run -Plocal 会加载 application-local.yml -->
   <profiles>
     <profile>
       <id>local</id>

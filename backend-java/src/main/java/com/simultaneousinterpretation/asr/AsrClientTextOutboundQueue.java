@@ -175,10 +175,13 @@ final class AsrClientTextOutboundQueue {
           continue;
         }
 
-        try {
-          session.sendMessage(new TextMessage(msg));
-        } catch (Exception e) {
-          log.debug("[LAT-FAST] sessionId={} transcript发送失败: {}", sessionId, e.getMessage());
+        synchronized (session) {
+          if (!session.isOpen()) continue;
+          try {
+            session.sendMessage(new TextMessage(msg));
+          } catch (Exception e) {
+            log.debug("[LAT-FAST] sessionId={} transcript发送失败: {}", sessionId, e.getMessage());
+          }
         }
       }
     } catch (InterruptedException e) {

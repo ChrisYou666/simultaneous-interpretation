@@ -10,6 +10,9 @@ backend-java/target/
 backend-java/src/main/resources/application-local.yml
 tsconfig.tsbuildinfo
 
+# Bundled Windows binaries (not needed on other platforms)
+node/
+
 # IDE
 .idea/
 .vscode/

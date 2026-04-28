@@ -24,9 +24,8 @@ export function resolveApiBaseAndAuth(): {
       "已设置 VITE_API_DIRECT，但未配置 VITE_API_BASE_URL（直连后端需要两者）。",
     );
   } else {
-    throw new Error(
-      "生产构建须设置 VITE_API_BASE_URL；本地开发默认走 Vite 代理，无需配置。",
-    );
+    // Production embedded in Spring Boot — API served from same origin, no explicit base URL needed
+    baseUrl = "";
   }
   const session = getSession();
   if (session?.token) {

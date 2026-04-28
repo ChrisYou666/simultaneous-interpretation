@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -135,6 +136,11 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
         session.getAttributes().put("asr.segmentsEmitted", new AtomicLong(0));
         session.getAttributes().put(ATTR_CURRENT_SRC_LANG, "zh");
         session.getAttributes().put(ATTR_LANG_GEN, new AtomicInteger(0));
+
+        // 等待 DashScope WebSocket 真正就绪（首帧成功发送）后再向浏览器发 ready，
+        // 避免 frame#1 因 SDK 处于 idle 状态被丢弃。
+        AtomicBoolean readyEmitted = new AtomicBoolean(false);
+        session.getAttributes().put("asr.readyEmitted", readyEmitted);
 
         boolean started = sdkWrapper.start(
                 sessionId,

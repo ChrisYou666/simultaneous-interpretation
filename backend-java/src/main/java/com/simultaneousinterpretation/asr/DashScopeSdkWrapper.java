@@ -56,6 +56,10 @@ public class DashScopeSdkWrapper {
         public final long createdAtMs;
         /** SDK 连接已建立（收到 onEvent 回调时为 true），在此之前不发送音频帧 */
         public final AtomicBoolean ready = new AtomicBoolean(false);
+        // DashScope WebSocket 真正就绪（首帧成功发送）—— 与 ready 独立
+        public volatile boolean dashscopeConnected = false;
+        // ready 事件已发送给浏览器（只发一次）
+        public volatile boolean readySent = false;
 
         // 音频帧统计
         public final AtomicLong framesSent = new AtomicLong(0);
@@ -282,6 +286,12 @@ public class DashScopeSdkWrapper {
      *   <li>发送前后延迟</li>
      *   <li>累积统计（帧数、字节数）</li>
      * </ul>
+     *
+     * @param sessionId 会话ID
+     * @param pcmData PCM 音频数据
+     */
+    /**
+     * 发送 PCM 音频帧。
      *
      * @param sessionId 会话ID
      * @param pcmData PCM 音频数据
