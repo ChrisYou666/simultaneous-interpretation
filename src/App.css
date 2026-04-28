@@ -280,18 +280,6 @@ button {
   padding-top: 0.5rem;
 }
 
-.si-host-room-hint {
-  flex-shrink: 0;
-  padding: 0 16px;
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.si-host-room-id {
-  color: #334155;
-}
-
 .si-host-asr-wrap {
   flex: 1;
   min-height: 0;
@@ -1023,51 +1011,6 @@ button {
   background: #34c759;
 }
 
-/* ─── 收听语言选择器 ─── */
-
-.si-tri-listen-wrap {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  background: #f0f7ff;
-  border: 1px solid #b3d4fc;
-  border-radius: 8px;
-  padding: 2px 4px 2px 8px;
-}
-
-.si-tri-select-label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #4a4a4a;
-  margin-right: 2px;
-}
-
-.si-tri-listen-icon-svg {
-  color: #007aff;
-  flex-shrink: 0;
-}
-
-.si-tri-listen-select {
-  appearance: none;
-  border: none;
-  background: transparent;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #007aff;
-  cursor: pointer;
-  padding: 3px 20px 3px 2px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24'%3E%3Cpath fill='%23007aff' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 2px center;
-}
-
-.si-tri-listen-select:focus {
-  outline: 2px solid #007aff;
-  outline-offset: 1px;
-  border-radius: 4px;
-}
-
 @media (max-width: 768px) {
   .si-dual-header,
   .si-dual-row {
@@ -1075,7 +1018,6 @@ button {
   }
   .si-dual-col-head { border-right: none; border-bottom: 1px solid #e8e8ec; }
   .si-dual-cell { border-right: none; }
-  .si-tri-listen-wrap { margin-left: 0; }
   .si-tri-toolbar { flex-wrap: wrap; }
 }
 
@@ -1887,99 +1829,6 @@ button {
   background: #f0f0f2;
   padding: 0.05rem 0.25rem;
   border-radius: 4px;
-}
-
-/* ─── 调参面板 ─── */
-
-.si-tri-tuning-btn {
-  margin-left: auto;
-  padding: 0.3rem 0.65rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  border: 1px solid #d1d1d6;
-  border-radius: 8px;
-  background: #fff;
-  color: #3a3a3c;
-  cursor: pointer;
-}
-
-.si-tri-tuning-btn:hover {
-  background: #f0f0f2;
-  border-color: #b3b3b8;
-}
-
-.si-tri-tuning-panel {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  padding: 0.85rem 1rem;
-  background: #fafafa;
-  border-bottom: 1px solid #ececee;
-}
-
-.si-tri-tuning-group {
-  min-width: 160px;
-}
-
-.si-tri-tuning-group-title {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #1c1c1e;
-  margin-bottom: 0.45rem;
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid #e0e0e4;
-}
-
-.si-tri-tuning-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.35rem;
-  font-size: 0.75rem;
-}
-
-.si-tri-tuning-row label {
-  min-width: 80px;
-  color: #636366;
-  font-weight: 500;
-}
-
-.si-tri-tuning-row input[type="number"] {
-  width: 80px;
-  padding: 0.25rem 0.4rem;
-  font-size: 0.78rem;
-  border: 1px solid #d1d1d6;
-  border-radius: 6px;
-  background: #fff;
-  color: #1c1c1e;
-}
-
-.si-tri-tuning-row input[type="number"]:focus {
-  outline: 2px solid #007aff;
-  outline-offset: 1px;
-}
-
-.si-tri-tuning-field {
-  margin-bottom: 0.65rem;
-}
-
-.si-tri-tuning-field:last-child {
-  margin-bottom: 0;
-}
-
-.si-tri-tuning-desc {
-  margin: 0.2rem 0 0;
-  padding-left: 0;
-  font-size: 0.68rem;
-  line-height: 1.45;
-  color: #636366;
-  max-width: 22rem;
-}
-
-.si-tri-tuning-loading {
-  margin: 0 0 0.5rem;
-  font-size: 0.75rem;
-  color: #8e8e93;
 }
 
 /* ─── 每段底部：横向紧凑展示各阶段耗时 + 总延迟 ─── */

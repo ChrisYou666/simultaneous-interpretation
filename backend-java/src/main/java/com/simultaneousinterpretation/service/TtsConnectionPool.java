@@ -46,7 +46,7 @@ public class TtsConnectionPool {
     private final ReentrantLock initLock = new ReentrantLock();
 
     public enum Lang {
-        ZH, EN, ID
+        ZH, ID
     }
 
     public TtsConnectionPool(TtsProperties ttsProperties, DashScopeProperties dashScopeProperties) {
@@ -69,7 +69,7 @@ public class TtsConnectionPool {
         // 预热连接（启动时建立连接，避免冷启动延迟）
         warmup();
 
-        log.info("[TTS-POOL] TTS 连接池初始化完成，3 种语言各 {} 个连接", poolSize);
+        log.info("[TTS-POOL] TTS 连接池初始化完成，2 种语言各 {} 个连接", poolSize);
     }
 
     private int getPoolSize() {

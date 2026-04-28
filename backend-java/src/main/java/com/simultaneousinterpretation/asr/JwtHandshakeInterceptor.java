@@ -20,9 +20,6 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
   public static final String ATTR_USERNAME = "asr.username";
   public static final String ATTR_FLOOR = "asr.floor";
-  public static final String ATTR_SOURCE_LANG = "asr.sourceLang";
-  public static final String ATTR_TARGET_LANG = "asr.targetLang";
-  public static final String ATTR_ROOM_ID = "asr.roomId";
 
   @Override
   public boolean beforeHandshake(
@@ -39,21 +36,10 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
     }
 
     int floor = parseFloor(queryParam(qs, "floor"));
-    String sourceLang = queryParam(qs, "sourceLang");
-    String targetLang = queryParam(qs, "targetLang");
-    String roomId = queryParam(qs, "roomId");
     attributes.put(ATTR_FLOOR, floor);
     attributes.put(ATTR_USERNAME, "user");
-    attributes.put(ATTR_SOURCE_LANG, sourceLang != null ? sourceLang : "auto");
-    attributes.put(ATTR_TARGET_LANG, targetLang != null ? targetLang : "zh");
-    attributes.put(ATTR_ROOM_ID, roomId);
 
-    log.info(
-        "[WS握手] 通过：floor={} sourceLang={} targetLang={} roomId={}",
-        floor,
-        sourceLang,
-        targetLang,
-        roomId);
+    log.info("[WS握手] 通过：floor={}", floor);
     return true;
   }
 

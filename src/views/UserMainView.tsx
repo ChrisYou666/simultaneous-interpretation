@@ -57,36 +57,8 @@ export function UserMainView({ session, onLogout }: Props) {
   const [apiErr, setApiErr] = useState(false);
   const [keywordsOpen, setKeywordsOpen] = useState(false);
   const [ai, setAi] = useState<AiAssistantSettings>(() => loadAiAssistant());
-  const [roomId, setRoomId] = useState<string>("");
 
   useEffect(() => { saveAiAssistant(ai); }, [ai]);
-
-  // 创建房间（后端要求 userId；供 ASR 带 roomId 转发原音 PCM 给听众）
-  const createRoom = async () => {
-    try {
-      const { baseUrl, authHeaders } = resolveApiBaseAndAuth();
-      const res = await fetch(`${baseUrl}/api/rooms`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({
-          userId: session.username,
-          roomName: "同传会议",
-        }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { roomId?: string };
-        setRoomId(data.roomId || "");
-      }
-    } catch (e) {
-      console.error("[房间] 创建失败", e);
-    }
-  };
-
-  useEffect(() => {
-    if (!roomId) {
-      void createRoom();
-    }
-  }, [roomId, session.username]);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,8 +85,8 @@ export function UserMainView({ session, onLogout }: Props) {
     <div className="si-root">
       <header className="si-topbar">
         <div className="si-topbar-left">
-          <h1 className="si-brand">同声传译</h1>
-          <span className="si-brand-sub">中文 / English / Bahasa Indonesia</span>
+          <h1 className="si-brand">聚龙同传</h1>
+          <span className="si-brand-sub">中文 / Bahasa Indonesia</span>
         </div>
         <div className="si-topbar-right">
           {apiErr && (
@@ -128,21 +100,11 @@ export function UserMainView({ session, onLogout }: Props) {
       </header>
 
       <main className="si-main-trilingual">
-        <p className="si-host-room-hint">
-          {roomId ? (
-            <>
-              听众请用此房间号加入：<strong className="si-host-room-id">{roomId}</strong>
-            </>
-          ) : (
-            <>正在创建会议房间…</>
-          )}
-        </p>
         <div className="si-host-asr-wrap">
           <StreamingAsrPanel
             floor={1}
             glossary={promptPayload.glossaryBlock}
             context={promptPayload.contextBlock}
-            roomId={roomId}
           />
         </div>
       </main>

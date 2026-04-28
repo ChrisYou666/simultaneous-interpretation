@@ -15,6 +15,3 @@ export type { LoginRequest, LoginResponse, UserSession, LocalSession } from "./a
 
 export { translateApi } from "./translate";
 export type { TranslateRequest, TranslateResponse, ImagePayload } from "./translate";
-
-export { roomApi } from "./room";
-export type { RoomInfo, CreateRoomRequest, JoinRoomRequest, RoomListParams } from "./room";

@@ -26,26 +26,22 @@ export function resolveBrowserWsRoot(): string {
 }
 
 /**
- * 三语同传 WebSocket URL（自动检测语言，翻译到另外两种）。
+ * 同传 WebSocket URL（自动检测语言，翻译到另外一种）。
  */
-export function buildAsrWebSocketUrl(floor = 1, roomId?: string): string {
+export function buildAsrWebSocketUrl(floor = 1): string {
   const wsRoot = resolveBrowserWsRoot();
   const session = getSession();
   const q = new URLSearchParams({ floor: String(floor) });
   if (session?.token) {
     q.set("access_token", session.token);
   }
-  if (roomId) {
-    q.set("roomId", roomId);
-  }
   return `${wsRoot}/ws/asr?${q.toString()}`;
 }
 
-export const ALL_LANGS = ["zh", "en", "id"] as const;
+export const ALL_LANGS = ["zh", "id"] as const;
 export type LangCode = (typeof ALL_LANGS)[number];
 export const LANG_LABELS: Record<LangCode, string> = {
   zh: "中文",
-  en: "English",
   id: "🇮🇩 印尼语",
 };
 
@@ -70,7 +66,6 @@ export function normalizeLangCode(raw: string | undefined | null): LangCode | nu
   if (raw == null || String(raw).trim() === "") return null;
   const r = String(raw).trim().toLowerCase();
   if (r.startsWith("zh") || r === "cn" || r === "chinese" || r === "mandarin") return "zh";
-  if (r.startsWith("en") || r === "english") return "en";
   if (r.startsWith("id") || r.includes("indonesia") || r === "in" || r.startsWith("ms") || r.includes("malay"))
     return "id";
   return null;

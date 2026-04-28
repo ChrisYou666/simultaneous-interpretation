@@ -49,7 +49,7 @@ export function LoginView({ onLoggedIn }: Props) {
   return (
     <div className="si-login">
       <div className="si-login-card">
-        <h1 className="si-login-title">同声传译</h1>
+          <h1 className="si-login-title">聚龙同传</h1>
         <p className="si-login-sub">请登录以继续使用</p>
         <form className="si-login-form" onSubmit={(e) => void submit(e)}>
           <label className="si-login-label">

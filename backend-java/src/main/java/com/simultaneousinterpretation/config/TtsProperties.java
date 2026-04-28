@@ -11,7 +11,6 @@ public class TtsProperties {
   private String apiKey = "";
   private String model = "cosyvoice-v3-flash";
   private String voiceZh = "longanyang";
-  private String voiceEn = "longanhuan";
   private String voiceId = "longanhuan";
   private int sampleRate = 24000;
   private int timeoutSec = 23;
@@ -26,9 +25,6 @@ public class TtsProperties {
 
   public String getVoiceZh() { return voiceZh; }
   public void setVoiceZh(String voiceZh) { this.voiceZh = voiceZh; }
-
-  public String getVoiceEn() { return voiceEn; }
-  public void setVoiceEn(String voiceEn) { this.voiceEn = voiceEn; }
 
   public String getVoiceId() { return voiceId; }
   public void setVoiceId(String voiceId) { this.voiceId = voiceId; }
@@ -48,9 +44,7 @@ public class TtsProperties {
   public String getVoice(String lang) {
     return switch (lang) {
       case "zh" -> voiceZh;
-      case "en" -> voiceEn;
-      case "id" -> voiceId;
-      default -> voiceZh;
+      default   -> voiceId;
     };
   }
 }

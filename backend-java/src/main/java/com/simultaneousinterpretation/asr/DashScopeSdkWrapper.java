@@ -54,6 +54,8 @@ public class DashScopeSdkWrapper {
         public final AtomicBoolean stopped = new AtomicBoolean(false);
         public final String sessionId;
         public final long createdAtMs;
+        /** SDK 连接已建立（收到 onEvent 回调时为 true），在此之前不发送音频帧 */
+        public final AtomicBoolean ready = new AtomicBoolean(false);
 
         // 音频帧统计
         public final AtomicLong framesSent = new AtomicLong(0);
@@ -98,6 +100,9 @@ public class DashScopeSdkWrapper {
 
         // 创建参数：只启用识别，关闭翻译（使用我们自己的翻译服务）
         long paramBuildStart = System.nanoTime();
+        // 阿里云 DashScope SDK 读取 System.getenv("DASHSCOPE_API_KEY")，
+        // 直接在 param 上设置 apiKey，绕过环境变量依赖
+        String apiKey = dashScopeProperties.getEffectiveApiKey(null);
         TranslationRecognizerParam param = TranslationRecognizerParam.builder()
                 .model("gummy-realtime-v1")
                 .format("pcm")
@@ -107,6 +112,7 @@ public class DashScopeSdkWrapper {
                 .sourceLanguage("auto")
                 .semanticPunctationEnabled(false)  // 关闭语义标点等待，减少缓冲延迟（旧 WebSocket 实现已明确关闭此项）
                 .maxEndSilence(6000)                // VAD 静音超时 6000ms（最大值），让 ASR 等待更充分后再触发切句
+                .apiKey(apiKey)
                 .build();
         long paramBuildNs = System.nanoTime() - paramBuildStart;
 
@@ -118,11 +124,6 @@ public class DashScopeSdkWrapper {
         long translatorCreateStart = System.nanoTime();
         final TranslationRecognizerRealtime translator;
         try {
-            String apiKey = dashScopeProperties.getEffectiveApiKey(null);
-            if (apiKey != null && !apiKey.isBlank()) {
-                System.setProperty("DASHSCOPE_API_KEY", apiKey);
-                log.info("[SDK-START] sessionId={} 已将 API Key 注入系统属性", sessionId);
-            }
             translator = new TranslationRecognizerRealtime();
         } catch (Exception e) {
             log.error("[SDK-START-FAIL] sessionId={} 初始化失败", sessionId, e);
@@ -145,6 +146,9 @@ public class DashScopeSdkWrapper {
             public void onEvent(TranslationRecognizerResult result) {
                 long callbackEntryTimeNs = System.nanoTime();
                 SdkInstance inst = getInstance(sid);
+                if (inst != null) {
+                    inst.ready.set(true);
+                }
                 long sessionAgeMs = inst != null ? System.currentTimeMillis() - inst.createdAtMs : 0;
 
                 String requestId = result.getRequestId();
@@ -291,7 +295,6 @@ public class DashScopeSdkWrapper {
             return;
         }
         if (instance.stopped.get()) {
-            // 静默忽略，避免日志刷屏
             return;
         }
 

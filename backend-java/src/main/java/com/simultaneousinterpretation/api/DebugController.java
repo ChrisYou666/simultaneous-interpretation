@@ -19,30 +19,29 @@ public class DebugController {
     this.asrProperties = asrProperties;
   }
 
+  /** 前端 /api/health 健康探针：返回 200 即表示后端可达 */
+  @GetMapping({"", "/"})
+  public Map<String, Object> health() {
+    Map<String, Object> r = new LinkedHashMap<>();
+    r.put("status", "ok");
+    return r;
+  }
+
   @GetMapping("/ws-check")
   public Map<String, Object> wsCheck() {
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("status", "ok");
     result.put("message", "此端点可达，说明 HTTP 路由到后端正常；WebSocket 握手在 /ws/asr 路径。");
 
-    String provider = asrProperties.getProvider();
-    result.put("asr.provider", provider);
-
-    if ("deepgram".equalsIgnoreCase(provider)) {
-      boolean hasKey = StringUtils.hasText(asrProperties.getDeepgram().getApiKey());
-      result.put("asr.deepgram.api-key.configured", hasKey);
-      if (!hasKey) {
-        result.put("warning", "DEEPGRAM_API_KEY 未配置，WebSocket 会握手成功但随后收到 ASR_NOT_CONFIGURED 错误。");
-      }
-    } else {
-      boolean hasKey = StringUtils.hasText(asrProperties.getDashscope().getApiKey());
-      result.put("asr.dashscope.api-key.configured", hasKey);
-      result.put("asr.dashscope.ws-url", asrProperties.getDashscope().getWsUrl());
-      result.put("asr.dashscope.model", asrProperties.getDashscope().getModel());
-      result.put("asr.dashscope.sample-rate", asrProperties.getDashscope().getSampleRate());
-      if (!hasKey) {
-        result.put("warning", "DASHSCOPE_API_KEY 未配置，WebSocket 会握手成功但随后收到 ASR_NOT_CONFIGURED 错误。");
-      }
+    AsrProperties.DashScope ds = asrProperties.getDashscope();
+    boolean hasKey = StringUtils.hasText(ds.getApiKey());
+    result.put("asr.provider", asrProperties.getProvider());
+    result.put("asr.dashscope.api-key.configured", hasKey);
+    result.put("asr.dashscope.ws-url", ds.getWsUrl());
+    result.put("asr.dashscope.model", ds.getModel());
+    result.put("asr.dashscope.sample-rate", ds.getSampleRate());
+    if (!hasKey) {
+      result.put("warning", "DASHSCOPE_API_KEY 未配置，WebSocket 会握手成功但随后收到 ASR_NOT_CONFIGURED 错误。");
     }
     return result;
   }

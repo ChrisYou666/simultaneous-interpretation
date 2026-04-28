@@ -26,41 +26,7 @@ public class TranslateService {
             "You are a professional interpreter. Translate the following {src} text into {tgt}.\n"
             + "Output only the concise, idiomatic {tgt} translation, no explanation.\n\n";
 
-    /** 中文目标：不压缩，直接透传 MT 结果 */
-    private static final String COMPRESSION_SYSTEM_PROMPT_SKIP =
-            null; // 占位，代码中直接跳过压缩
-
-    /** 英语目标：压缩至 60%%~70%%，英语专用提示词 */
-    private static final String COMPRESSION_SYSTEM_PROMPT_EN =
-            "You are a simultaneous interpretation compression model.\n\n"
-            + "Task: Compress the already-translated English text into a concise real-time interpretation version.\n\n"
-            + "【Input Rules】\n"
-            + "- The input text is already in English. Do NOT translate again.\n"
-            + "- Preserve all proper nouns unchanged.\n\n"
-            + "【Compression Rules】\n"
-            + "1. Remove fillers, discourse markers, and conversational phrases.\n"
-            + "2. Remove repetition and non-essential modifiers.\n"
-            + "3. Preserve all key facts and logical relationships.\n"
-            + "4. Keep the original event order.\n\n"
-            + "【Strict Constraints】\n"
-            + "5. Do NOT add any new information.\n"
-            + "6. Do NOT interpret, infer, or summarize.\n"
-            + "7. The following expressions are strictly forbidden:\n"
-            + "   - \"this means\"\n"
-            + "   - \"this shows\"\n"
-            + "   - \"in conclusion\"\n\n"
-            + "【Length Control】\n"
-            + "8. Target: 60%%~70%% of the original length.\n"
-            + "9. Must NOT exceed the original length.\n"
-            + "10. Do NOT lose key facts.\n\n"
-            + "【Style】\n"
-            + "11. Use short sentences (≤15 words).\n"
-            + "12. Split long sentences.\n"
-            + "13. One sentence, one action.\n"
-            + "14. Avoid subordinate clauses and complex grammar.\n\n"
-            + "Output only the compressed text, no explanation.";
-
-    /** 印尼语目标：压缩至 60%%~70%%，印尼语专用提示词（严格约束禁止改写） */
+    /** 印尼语目标：压缩至 60%~70%，严格约束禁止改写 */
     private static final String COMPRESSION_SYSTEM_PROMPT_ID =
             "You are a simultaneous interpretation compression model.\n\n"
             + "Task: Compress the already-translated Indonesian text into a concise real-time interpretation version.\n\n"
@@ -71,7 +37,7 @@ public class TranslateService {
             + "1. Do NOT rephrase or rewrite the original meaning.\n"
             + "2. Do NOT add any information not present in the input.\n"
             + "3. Do NOT add explanations, summaries, or conclusions.\n"
-            + "4. Do NOT use emotional or dramatic expressions.\n"
+            + "4. Do NOT add emotional or dramatic expressions.\n"
             + "5. The following words/phrases are strictly forbidden:\n"
             + "   - \"artinya\" (meaning)\n"
             + "   - \"intinya\" (in summary)\n"
@@ -87,7 +53,7 @@ public class TranslateService {
             + "8. Preserve all facts, actions, and results.\n"
             + "9. Keep the original order.\n\n"
             + "【Length Control】\n"
-            + "10. Target: 60%%~70%% of the original length.\n"
+            + "10. Target: 60%~70% of the original length.\n"
             + "11. Do NOT delete key actions or events.\n\n"
             + "【Style (Strict)】\n"
             + "12. Use very simple sentence structures.\n"
@@ -100,42 +66,25 @@ public class TranslateService {
             + "- Do not polish or enhance expressions.\n\n"
             + "Output only the compressed text, no explanation.";
 
-    /** 内部语言代码 → OpenAI API 语言名称 */
-    private static final Map<String, String> LANG_CODE_MAP;
-    static {
-        var m = new java.util.HashMap<String, String>();
-        m.put("en", "English");
-        m.put("zh", "Chinese");
-        m.put("id", "Indonesian");
-        m.put("ja", "Japanese");
-        m.put("ko", "Korean");
-        m.put("fr", "French");
-        m.put("es", "Spanish");
-        m.put("de", "German");
-        m.put("th", "Thai");
-        m.put("vi", "Vietnamese");
-        m.put("ar", "Arabic");
-        LANG_CODE_MAP = Map.copyOf(m);
-    }
+    private static final Map<String, String> LANG_CODE_MAP = Map.of(
+            "zh", "Chinese",
+            "id", "Indonesian"
+    );
 
     private final DashScopeProperties dashScopeProperties;
     private final AiProperties aiProperties;
     private final LlmIntegration llmIntegration;
     private final Map<String, String> modelCache = new ConcurrentHashMap<>();
 
-    /**
-     * 翻译入口：两步管道 翻译 → 压缩。
-     */
     public TranslateResponse translate(TranslateRequest request) {
         return translateThenCompress(request);
     }
 
     /**
-     * 两步管道：步骤一 Qwen-MT 忠实翻译 → 步骤二 Qwen3-Max 意译压缩。
-     * 压缩目标：译文长度 / ASR 源文本长度 = 80%% ~ 120%%。
+     * 两步管道：步骤一 Qwen-MT 忠实翻译 → 步骤二 Qwen3-Max 意译压缩（仅 id 目标执行）。
      */
     public TranslateResponse translateThenCompress(TranslateRequest request) {
-        log.info("翻译请求开始（两步管道），源语言={}, 目标语言={}, 文本长度={}",
+        log.info("翻译请求开始，源语言={}, 目标语言={}, 文本长度={}",
                  request.getSourceLang(), request.getTargetLang(),
                  request.getSegment() != null ? request.getSegment().length() : 0);
         long startTime = System.currentTimeMillis();
@@ -156,7 +105,7 @@ public class TranslateService {
             String mtModel = getEffectiveModel();
             String compModel = dashScopeProperties.getCompressionModel();
 
-            // ── 步骤一：Qwen-MT 翻译 ───────────────────────────────────────
+            // ── 步骤一：Qwen-MT 翻译 ────────────────────────────────────────
             long mtStart = System.currentTimeMillis();
             String mtUserMessage = buildMTUserMessage(srcText, srcLangName, tgtLangName);
             String mtResult = llmIntegration.chatForTranslation(
@@ -166,48 +115,28 @@ public class TranslateService {
                 throw new BizException(ErrorCode.TRANSLATE_FAILED, "Qwen-MT 翻译返回为空");
             }
             int mtLen = mtResult.trim().length();
-            log.info("[PIPE-a-XLAT] model={} srcLen={} mtLen={} ratio={}%% ms={} text={}",
+            log.info("[PIPE-a-XLAT] model={} srcLen={} mtLen={} ratio={}% ms={} text={}",
                      mtModel, srcLen, mtLen,
                      srcLen > 0 ? String.format("%.1f", (double) mtLen / srcLen * 100) : "0",
                      mtMs, truncate(srcText, 40));
 
-            // ── 步骤二：按目标语言决定是否压缩 ───────────────────────────────
-            String compSystem;
-            boolean doCompress;
-            switch (request.getTargetLang()) {
-                case "zh" -> {
-                    // 中文目标：不压缩
-                    doCompress = false;
-                    compSystem = null;
-                    log.info("[PIPE-b-SKIP] targetLang=zh, 跳过压缩，直接透传 MT 结果");
-                }
-                case "id" -> {
-                    // 印尼语目标：压缩至 60%%~70%%
-                    doCompress = true;
-                    compSystem = COMPRESSION_SYSTEM_PROMPT_ID;
-                    log.info("[PIPE-b-COMP] targetLang=id, 压缩目标 60%%~70%%");
-                }
-                default -> {
-                    // 英语及其他：压缩至 60%%~70%
-                    doCompress = true;
-                    compSystem = COMPRESSION_SYSTEM_PROMPT_EN;
-                    log.info("[PIPE-b-COMP] targetLang={}, 压缩目标 60%%~70%%", request.getTargetLang());
-                }
-            }
-
+            // ── 步骤二：zh 目标不压缩，id 目标压缩至 60%~70% ─────────────────
             String finalText;
             String finalModel;
             int finalLen;
             double compRatio;
-            if (!doCompress) {
+
+            if ("zh".equals(request.getTargetLang())) {
+                log.info("[PIPE-b-SKIP] targetLang=zh, 跳过压缩");
                 finalText = mtResult.trim();
                 finalModel = mtModel;
                 finalLen = mtLen;
                 compRatio = srcLen > 0 ? (double) mtLen / srcLen : 0;
             } else {
+                log.info("[PIPE-b-COMP] targetLang={}, 压缩目标 60%~70%", request.getTargetLang());
                 long compStart = System.currentTimeMillis();
-                String compUser = mtResult.trim();
-                String compResult = llmIntegration.chat(compSystem, compUser, apiKey, baseUrl, compModel);
+                String compResult = llmIntegration.chat(
+                        COMPRESSION_SYSTEM_PROMPT_ID, mtResult.trim(), apiKey, baseUrl, compModel);
                 long compMs = System.currentTimeMillis() - compStart;
 
                 if (compResult == null || compResult.isBlank()) {
@@ -221,14 +150,14 @@ public class TranslateService {
                     finalModel = compModel;
                     finalLen = finalText.length();
                     compRatio = srcLen > 0 ? (double) finalLen / srcLen : 0;
-                    log.info("[PIPE-b-COMP] model={} mtLen={} compLen={} compRatio={}%% ms={}",
+                    log.info("[PIPE-b-COMP] model={} mtLen={} compLen={} compRatio={}% ms={}",
                              compModel, mtLen, finalLen,
                              String.format("%.1f", compRatio * 100), compMs);
                 }
             }
 
             long totalMs = System.currentTimeMillis() - startTime;
-            log.info("[PIPE-COMBINED] totalMs={} srcLen={} finalLen={} finalRatio={}%%",
+            log.info("[PIPE-COMBINED] totalMs={} srcLen={} finalLen={} finalRatio={}%",
                      totalMs, srcLen, finalLen,
                      String.format("%.1f", srcLen > 0 ? (double) finalLen / srcLen * 100 : 0));
 

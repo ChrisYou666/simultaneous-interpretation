@@ -54,29 +54,12 @@ app:
       sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
       format: pcm
       semantic-punctuation-enabled: false
-    deepgram:
-      api-key: ${DEEPGRAM_API_KEY:}
-      model: ${DEEPGRAM_MODEL:nova-2}
-      sample-rate: ${DEEPGRAM_ASR_SAMPLE_RATE:48000}
-      interim-results: true
-      detect-language: true
-    openai:
-      api-key: ${OPENAI_ASR_API_KEY:${OPENAI_API_KEY:}}
-      base-url: ${OPENAI_ASR_BASE_URL:https://api.openai.com/v1}
-      model: ${OPENAI_ASR_MODEL:gpt-4o-transcribe}
-      sample-rate: ${OPENAI_ASR_SAMPLE_RATE:24000}
-      language: ${OPENAI_ASR_LANGUAGE:}
-      vad-enabled: true
-      vad-prefix-padding-ms: 300
-      vad-suffix-padding-ms: 300
-      vad-threshold: 0.5
 
   # TTS：CosyVoice 流式合成，三语分别配置音色
   tts:
     api-key: ${TTS_API_KEY:${DASHSCOPE_API_KEY:}}
     model: ${TTS_MODEL:cosyvoice-v3-flash}
     voice-zh: ${TTS_VOICE_ZH:longanyang}
-    voice-en: ${TTS_VOICE_EN:longanhuan}
     voice-id: ${TTS_VOICE_ID:loongindah_v3}
     sample-rate: ${TTS_SAMPLE_RATE:24000}
 
@@ -87,10 +70,8 @@ app:
     dashscope-model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
     dashscope-sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
     dashscope-semantic-punctuation: false
-    deepgram-sample-rate: ${DEEPGRAM_ASR_SAMPLE_RATE:48000}
-    deepgram-model: ${DEEPGRAM_MODEL:nova-2}
 
-  # 语言检测：bigram 评分，zh/en/id 三语，默认启用
+  # 语言检测：CJK 字符扫描，zh/id 二语，默认启用
   lang-detect:
     enabled: ${LANG_DETECT_ENABLED:true}
     confidence-threshold: ${LANG_DETECT_CONFIDENCE_THRESHOLD:0.2}
@@ -98,5 +79,4 @@ app:
   # 虚拟音频输出设备（VoiceMeeter Potato，子串匹配设备名，不区分大小写）
   audio-output:
     device-zh: ${AUDIO_OUT_ZH:VoiceMeeter Input}
-    device-en: ${AUDIO_OUT_EN:VoiceMeeter VAIO3 Input}
     device-id: ${AUDIO_OUT_ID:VoiceMeeter Aux Input}

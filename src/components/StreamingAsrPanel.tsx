@@ -22,7 +22,7 @@ export type HistoryEntry = {
   ts: number;
 };
 
-type Props = { floor?: number; glossary?: string; context?: string; roomId?: string };
+type Props = { floor?: number; glossary?: string; context?: string };
 
 /** 批内子句 */
 type SubSeg = {
@@ -57,130 +57,7 @@ function IconLatencyHeadset() {
   );
 }
 
-const TUNING_FIELDS: {
-  group: string;
-  key: string;
-  label: string;
-  desc: string;
-  min: number;
-  max: number;
-  step?: number;
-  defaultNum: number;
-}[] = [
-  {
-    group: "切段",
-    key: "segMaxChars",
-    label: "maxChars",
-    desc: "单段最大字符数（中文基准）；越小越早送出翻译/TTS，延迟更低，但句子更易被切碎。",
-    min: 8,
-    max: 512,
-    defaultNum: 50,
-  },
-  {
-    group: "切段",
-    key: "segEnMaxCharsMultiplier",
-    label: "enMultiplier",
-    desc: "英语句子 maxChars 倍数（避免短句过度切分导致卡顿）；建议 1.5-2.5。",
-    min: 1.0,
-    max: 4.0,
-    step: 0.1,
-    defaultNum: 2.0,
-  },
-  {
-    group: "切段",
-    key: "segEnMaxCharsMin",
-    label: "enMinChars",
-    desc: "英语句子 maxChars 最小值；防止倍数为 1 时仍过短。",
-    min: 10,
-    max: 200,
-    defaultNum: 10,
-  },
-  {
-    group: "切段",
-    key: "segEnMaxCharsMax",
-    label: "enMaxChars",
-    desc: "英语句子 maxChars 最大值（建议 60-80，英文问句较长需要更大缓冲区）。",
-    min: 20,
-    max: 200,
-    defaultNum: 80,
-  },
-  {
-    group: "切段",
-    key: "segIdMaxCharsMultiplier",
-    label: "idMultiplier",
-    desc: "印尼语 maxChars 倍数（印尼语词汇更长，虚词较多）；建议 1.5-2.0。",
-    min: 1.0,
-    max: 4.0,
-    step: 0.1,
-    defaultNum: 1.6,
-  },
-  {
-    group: "切段",
-    key: "segIdMaxCharsMin",
-    label: "idMinChars",
-    desc: "印尼语 maxChars 最小值；防止倍数为 1 时仍过短。",
-    min: 10,
-    max: 200,
-    defaultNum: 10,
-  },
-  {
-    group: "切段",
-    key: "segIdMaxCharsMax",
-    label: "idMaxChars",
-    desc: "印尼语 maxChars 最大值；印尼语独立阈值，防止超长句。",
-    min: 20,
-    max: 200,
-    defaultNum: 60,
-  },
-  {
-    group: "切段",
-    key: "segSoftBreakChars",
-    label: "softBreakChars",
-    desc: "至少多长才开始在逗号、空格等「软标点」处切分；略大则更倾向整句再切。",
-    min: 4,
-    max: 256,
-    defaultNum: 15,
-  },
-  {
-    group: "切段",
-    key: "segFlushTimeoutMs",
-    label: "flushTimeoutMs",
-    desc: "距上次切出超过该毫秒则强制刷出缓冲（建议 400-600ms，英文/印尼语一句话可能包含多个分句）。",
-    min: 50,
-    max: 10000,
-    defaultNum: 500,
-  },
-  {
-    group: "翻译",
-    key: "translateMaxTokens",
-    label: "maxTokens",
-    desc: "单次翻译生成上限 token；同传短句可调小以缩短模型耗时。",
-    min: 32,
-    max: 2048,
-    defaultNum: 320,
-  },
-  {
-    group: "翻译",
-    key: "translateTimeoutSec",
-    label: "timeoutSec",
-    desc: "调用翻译 HTTP 的超时秒数；过短易失败，过长则卡住久等。",
-    min: 5,
-    max: 120,
-    defaultNum: 25,
-  },
-  {
-    group: "TTS",
-    key: "ttsRate",
-    label: "ttsRate",
-    desc: "TTS 基础语速（0.5–2.0）。",
-    min: 0.5,
-    max: 2,
-    step: 0.1,
-    defaultNum: 1.0,
-  },
-];
-
-export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", roomId }: Props) {
+export function StreamingAsrPanel({ floor = 1, glossary = "", context = "" }: Props) {
   const [running, setRunning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [partial, setPartial] = useState("");
@@ -200,17 +77,9 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   const [batches, setBatches] = useState<BatchEntry[]>([]);
   /** 全局翻译文本：index → lang → text */
   const [translations, setTranslations] = useState<Map<number, Map<string, string>>>(new Map());
-  const [listenLang, _setListenLang] = useState<LangCode>("zh");
   const [playingSegIdx, setPlayingSegIdx] = useState(-1);
 
-  /** 调参面板展开状态 */
-  const [showTuning, setShowTuning] = useState(false);
-  /** 调参参数值 */
-  const [tuningParams, setTuningParams] = useState<Record<string, number | string>>({});
-  /** 调参加载中 */
-  const [tuningLoading, setTuningLoading] = useState(false);
-
-  /** 历史记录（按 zh→en→id 顺序） */
+  /** 历史记录（按 zh→id 顺序） */
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -218,7 +87,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   const processorRef = useRef<AudioNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const listenLangRef = useRef<LangCode>(listenLang);
   /** 上行 PCM 采样率（与 ready / segment.inputSampleRate 一致） */
   const sentSampleRateRef = useRef(16000);
   /** 已发往 WS 的累计 int16 采样数 */
@@ -231,47 +99,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
   const bodyRef = useRef<HTMLDivElement>(null);
   /** 捕获流疑似静音（标签页静音 / 选错源 / 未勾选分享音频等） */
   const [captureSilentWarn, setCaptureSilentWarn] = useState(false);
-
-  /* ── 调参 API ── */
-  const loadTuningParams = useCallback(async () => {
-    setTuningLoading(true);
-    try {
-      const res = await fetch("/api/tuning/params");
-      if (res.ok) {
-        const data = await res.json();
-        setTuningParams(data);
-      }
-    } catch {
-      /* ignore */
-    } finally {
-      setTuningLoading(false);
-    }
-  }, []);
-
-  const applyTuningParam = useCallback(async (key: string, value: number | string) => {
-    try {
-      const res = await fetch("/api/tuning/params", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [key]: value }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTuningParams(data.current);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  /* ── Language switch ── */
-  const setListenLang = useCallback((lang: LangCode) => {
-    _setListenLang(lang);
-    listenLangRef.current = lang;
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ action: "setListenLang", lang }));
-    }
-  }, []);
 
   /* ── Cleanup ── */
   const stopInternal = useCallback(() => {
@@ -516,7 +343,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
       return;
     }
 
-    const url = buildAsrWebSocketUrl(floor, roomId);
+    const url = buildAsrWebSocketUrl(floor);
     const ws = new WebSocket(url); ws.binaryType = "arraybuffer"; wsRef.current = ws;
     let targetSampleRate = 16000;
 
@@ -527,15 +354,13 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
         ws.onerror = () => fail("WebSocket 连接被拒绝。请检查后端是否运行。");
         ws.onclose = (ev) => { if (settled) return; fail(`WebSocket 握手被拒绝（code ${ev.code}）。`); };
         ws.onopen = () => {
-          console.info("[ASR-WS] WebSocket 连接建立 floor=%d roomId=%s", floor, roomId || "无");
+          console.info("[ASR-WS] WebSocket 连接建立 floor=%d", floor);
           if (settled) return;
           settled = true;
           ws.onerror = null;
           ws.onclose = null;
-          /* 在等 ready 之前下发 glossary / 收听语 */
+          /* 在等 ready 之前下发 glossary */
           if (glossary || context) ws.send(JSON.stringify({ action: "setGlossary", glossary, context }));
-          ws.send(JSON.stringify({ action: "setListenLang", lang: listenLangRef.current }));
-          console.info("[ASR-WS] 发送 setListenLang=%s", listenLangRef.current);
           resolve();
         };
       });
@@ -715,65 +540,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
               {LANG_LABELS[detectedLang as LangCode] ?? detectedLang}
             </span>
           ) : null}
-          <button
-            type="button"
-            className="si-tri-tuning-btn"
-            onClick={() => {
-              if (!showTuning) loadTuningParams();
-              setShowTuning((v) => !v);
-            }}
-            title="调参面板"
-          >
-            {showTuning ? "隐藏调参" : "调参"}
-          </button>
         </div>
-
-        {showTuning && (
-          <div className="si-tri-tuning-panel">
-            {tuningLoading && <p className="si-tri-tuning-loading">正在加载当前参数…</p>}
-            {(["切段", "翻译", "TTS"] as const).map((groupName) => (
-              <div key={groupName} className="si-tri-tuning-group">
-                <div className="si-tri-tuning-group-title">{groupName}参数</div>
-                {TUNING_FIELDS.filter((f) => f.group === groupName).map((field) => {
-                  const raw = (tuningParams as Record<string, number | string>)[field.key];
-                  const num =
-                    typeof raw === "number"
-                      ? raw
-                      : typeof raw === "string"
-                        ? parseFloat(raw)
-                        : field.defaultNum;
-                  const safe = Number.isFinite(num) ? num : field.defaultNum;
-                  const isFloat = field.step !== undefined && !Number.isInteger(field.step);
-                  return (
-                    <div key={field.key} className="si-tri-tuning-field">
-                      <div className="si-tri-tuning-row">
-                        <label htmlFor={`tuning-${field.key}`} title={field.desc}>
-                          {field.label}
-                        </label>
-                        <input
-                          id={`tuning-${field.key}`}
-                          type="number"
-                          value={safe}
-                          min={field.min}
-                          max={field.max}
-                          step={field.step}
-                          onChange={(e) => {
-                            const v = isFloat
-                              ? parseFloat(e.target.value)
-                              : parseInt(e.target.value, 10);
-                            if (!Number.isFinite(v)) return;
-                            void applyTuningParam(field.key, v);
-                          }}
-                        />
-                      </div>
-                      <p className="si-tri-tuning-desc">{field.desc}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        )}
 
         {err && <p className="si-tri-err" style={{ whiteSpace: "pre-wrap" }}>{err}</p>}
 
@@ -781,7 +548,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
           <div className="si-tri-transcript-dock-inner" ref={bodyRef}>
             {batches.length === 0 && !running && (
               <div className="si-tri-empty">
-                点击「开始收音」，在弹窗中选择要识别的标签页或窗口，并勾选分享音频（源语言可为中文、英语或印尼语）
+                点击「开始收音」，在弹窗中选择要识别的标签页或窗口，并勾选分享音频（源语言可为中文或印尼语）
               </div>
             )}
             {batches.length === 0 && running && !partial && (
@@ -812,7 +579,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
                   data-merged-indices={mergedIndices}
                   className={`si-tri-block ${rowActive ? "si-tri-block--playing" : ""}`}
                 >
-                  {(["zh", "en", "id"] as LangCode[]).map((lang) => {
+                  {(["zh", "id"] as LangCode[]).map((lang) => {
                     const { text, pending } = getBatchLine(batch, lang);
                     return (
                       <div key={lang} className="si-tri-block-line">
@@ -846,7 +613,7 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
                   <IconLatencyHeadset />
                   <span>实时</span>
                 </div>
-                {(["zh", "en", "id"] as LangCode[]).map((lang) => {
+                {(["zh", "id"] as LangCode[]).map((lang) => {
                   const srcNorm = normalizeLangCode(detectedLang);
                   const srcLang: LangCode =
                     srcNorm !== null
@@ -882,13 +649,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
       </div>
 
       <div className="si-tri-footer">
-        <div className="si-tri-listen-wrap">
-          <span className="si-tri-select-label">收听</span>
-          <svg className="si-tri-listen-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M11 5L6 9H3v6h3l5 4V5zm7.5 7a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4z" fill="currentColor"/></svg>
-          <select className="si-tri-listen-select" value={listenLang} disabled={running} onChange={(e) => setListenLang(e.target.value as LangCode)} aria-label="收听语言">
-            {ALL_LANGS.map((l) => <option key={l} value={l}>{LANG_LABELS[l]}</option>)}
-          </select>
-        </div>
         {!running
           ? <button type="button" className="si-tri-btn" onClick={() => void start()}>开始收音</button>
           : <button type="button" className="si-tri-btn si-tri-btn--stop" onClick={stop}>停止</button>}
@@ -906,7 +666,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
                 <th>#</th>
                 <th>原文（检测语种）</th>
                 <th>中文翻译</th>
-                <th>English</th>
                 <th>Bahasa Indonesia</th>
               </tr>
             </thead>
@@ -923,7 +682,6 @@ export function StreamingAsrPanel({ floor = 1, glossary = "", context = "", room
                       {srcText}
                     </td>
                     <td>{entry.transByLang["zh"] ?? <span className="si-history-empty">—</span>}</td>
-                    <td>{entry.transByLang["en"] ?? <span className="si-history-empty">—</span>}</td>
                     <td>{entry.transByLang["id"] ?? <span className="si-history-empty">—</span>}</td>
                   </tr>
                 );

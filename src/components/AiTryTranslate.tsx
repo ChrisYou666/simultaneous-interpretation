@@ -3,8 +3,8 @@ import { translateWithFullContext } from "../lib/translateApi";
 
 export function AiTryTranslate() {
   const [segment, setSegment] = useState("");
-  const [sourceLang, setSourceLang] = useState("en");
-  const [targetLang, setTargetLang] = useState("zh");
+  const [sourceLang, setSourceLang] = useState("zh");
+  const [targetLang, setTargetLang] = useState("id");
   const [result, setResult] = useState<string | null>(null);
   const [meta, setMeta] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -49,7 +49,7 @@ export function AiTryTranslate() {
             className="si-try-input"
             value={sourceLang}
             onChange={(e) => setSourceLang(e.target.value)}
-            placeholder="en"
+            placeholder="zh"
           />
         </label>
         <label className="si-try-field">
@@ -58,7 +58,7 @@ export function AiTryTranslate() {
             className="si-try-input"
             value={targetLang}
             onChange={(e) => setTargetLang(e.target.value)}
-            placeholder="zh"
+            placeholder="id"
           />
         </label>
       </div>

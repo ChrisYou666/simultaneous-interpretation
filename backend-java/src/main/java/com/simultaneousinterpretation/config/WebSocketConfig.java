@@ -2,7 +2,6 @@ package com.simultaneousinterpretation.config;
 
 import com.simultaneousinterpretation.asr.AsrWebSocketHandler;
 import com.simultaneousinterpretation.asr.JwtHandshakeInterceptor;
-import com.simultaneousinterpretation.meeting.RoomWebSocketHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -15,15 +14,12 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 public class WebSocketConfig implements WebSocketConfigurer {
 
   private final AsrWebSocketHandler asrWebSocketHandler;
-  private final RoomWebSocketHandler roomWebSocketHandler;
   private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
 
   public WebSocketConfig(
       AsrWebSocketHandler asrWebSocketHandler,
-      RoomWebSocketHandler roomWebSocketHandler,
       JwtHandshakeInterceptor jwtHandshakeInterceptor) {
     this.asrWebSocketHandler = asrWebSocketHandler;
-    this.roomWebSocketHandler = roomWebSocketHandler;
     this.jwtHandshakeInterceptor = jwtHandshakeInterceptor;
   }
 
@@ -45,11 +41,6 @@ public class WebSocketConfig implements WebSocketConfigurer {
         .addHandler(asrWebSocketHandler, "/ws/asr")
         .addInterceptors(jwtHandshakeInterceptor)
         // Spring 6：用 Origin 模式替代已弃用的 setAllowedOrigins("*")，否则浏览器带 Origin 时握手易失败
-        .setAllowedOriginPatterns("*");
-
-    // 听众 /ws/room/{roomId}（与 ListenerView 一致）；此前未注册会导致握手 404 → 前端「连接失败」
-    registry
-        .addHandler(roomWebSocketHandler, "/ws/room/**")
         .setAllowedOriginPatterns("*");
   }
 }

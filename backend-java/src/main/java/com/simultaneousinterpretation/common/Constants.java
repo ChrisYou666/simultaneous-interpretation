@@ -46,49 +46,12 @@ public final class Constants {
      */
     public static final String SESSION_USER = "currentUser";
 
-    // ==================== 房间相关常量 ====================
-
-    /**
-     * 角色: 主持人
-     */
-    public static final String ROLE_HOST = "host";
-
-    /**
-     * 角色: 听众
-     */
-    public static final String ROLE_LISTENER = "listener";
-
-    /**
-     * 默认房间最大容量
-     */
-    public static final int DEFAULT_ROOM_CAPACITY = 100;
-
-    /**
-     * 房间状态: 开放
-     */
-    public static final String ROOM_STATUS_OPEN = "open";
-
-    /**
-     * 房间状态: 关闭
-     */
-    public static final String ROOM_STATUS_CLOSED = "closed";
-
-    /**
-     * 房间状态: 进行中
-     */
-    public static final String ROOM_STATUS_IN_PROGRESS = "in_progress";
-
     // ==================== 语言相关常量 ====================
 
     /**
      * 语言: 中文
      */
     public static final String LANG_ZH = "zh";
-
-    /**
-     * 语言: 英文
-     */
-    public static final String LANG_EN = "en";
 
     /**
      * 语言: 印尼文
@@ -173,15 +136,7 @@ public final class Constants {
 
     // ==================== WebSocket 相关常量 ====================
 
-    /**
-     * WebSocket 端点路径
-     */
     public static final String WS_ENDPOINT = "/ws/asr";
-
-    /**
-     * WebSocket 房间端点路径
-     */
-    public static final String WS_ROOM_ENDPOINT = "/ws/room";
 
     /**
      * 最大 WebSocket 消息大小（字节）
@@ -245,16 +200,6 @@ public final class Constants {
      * 错误消息: Token 已过期
      */
     public static final String MSG_TOKEN_EXPIRED = "Token已过期，请重新登录";
-
-    /**
-     * 错误消息: 房间不存在
-     */
-    public static final String MSG_ROOM_NOT_FOUND = "房间不存在";
-
-    /**
-     * 错误消息: 房间已满
-     */
-    public static final String MSG_ROOM_FULL = "房间已满，请稍后再试";
 
     /**
      * 错误消息: 无权限操作

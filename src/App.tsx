@@ -3,7 +3,6 @@ import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { authSession } from "./api";
 import { LoginView } from "./views/LoginView";
 import { UserMainView } from "./views/UserMainView";
-import { ListenerView } from "./views/ListenerView";
 
 /**
  * 用户会话类型
@@ -63,9 +62,6 @@ export default function App() {
   return (
     <HashRouter>
       <Routes>
-        {/* 听众界面：无需登录 */}
-        <Route path="/listener" element={<ListenerView />} />
-        {/* 主持人界面：需要登录 */}
         {session ? (
           <Route path="/*" element={<HostRoutes session={session} onLogout={handleLogout} />} />
         ) : (

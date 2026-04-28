@@ -10,23 +10,18 @@ import org.springframework.stereotype.Component;
  * 系统会在所有 javax.sound.sampled Mixer 里找第一个包含该关键字的播放设备。
  *
  * VoiceMeeter Potato 方案（完全免费）：
- *   device-zh: "VoiceMeeter Input"
- *   device-en: "VoiceMeeter Aux Input"
- *   device-id: "VoiceMeeter VAIO3 Input"
+ *   device-zh: "VoiceMeeter Input"       (B1)
+ *   device-id: "VoiceMeeter Aux Input"   (B2)
  */
 @Component
 @ConfigurationProperties(prefix = "app.audio-output")
 public class AudioOutputProperties {
 
     private String deviceZh = "";
-    private String deviceEn = "";
     private String deviceId = "";
 
     public String getDeviceZh() { return deviceZh; }
     public void setDeviceZh(String deviceZh) { this.deviceZh = deviceZh; }
-
-    public String getDeviceEn() { return deviceEn; }
-    public void setDeviceEn(String deviceEn) { this.deviceEn = deviceEn; }
 
     public String getDeviceId() { return deviceId; }
     public void setDeviceId(String deviceId) { this.deviceId = deviceId; }
@@ -34,9 +29,7 @@ public class AudioOutputProperties {
     public String getDevice(String lang) {
         return switch (lang.toLowerCase()) {
             case "zh" -> deviceZh;
-            case "en" -> deviceEn;
-            case "id" -> deviceId;
-            default -> "";
+            default   -> deviceId;
         };
     }
 }
