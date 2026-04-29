@@ -1,0 +1,10 @@
+# 开发环境配置（profile=dev）
+# 由 启动.bat 通过 -Pdev 激活，覆盖 application.yml 中的对应项
+
+logging:
+  level:
+    root: INFO
+    com.simultaneousinterpretation: INFO
+    # SDK 帧日志在 INFO 下可见，便于调试延迟问题
+    com.simultaneousinterpretation.asr.DashScopeSdkWrapper: INFO
+    com.simultaneousinterpretation.asr.AsrWebSocketHandler: INFO

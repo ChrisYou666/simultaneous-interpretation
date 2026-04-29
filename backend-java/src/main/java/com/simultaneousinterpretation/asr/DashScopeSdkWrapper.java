@@ -297,8 +297,6 @@ public class DashScopeSdkWrapper {
      * @param pcmData PCM 音频数据
      */
     public void sendAudioFrame(String sessionId, byte[] pcmData) {
-        long entryTimeNs = System.nanoTime();
-
         SdkInstance instance = instances.get(sessionId);
         if (instance == null) {
             log.warn("[SDK-SEND] sessionId={} 实例不存在，跳过帧 size={}bytes", sessionId, pcmData.length);
@@ -311,42 +309,58 @@ public class DashScopeSdkWrapper {
         long beforeSendTimeNs = System.nanoTime();
         long framesSoFar = instance.framesSent.incrementAndGet();
         long bytesSoFar = instance.bytesSent.addAndGet(pcmData.length);
-        long timeSinceLastFrame = instance.lastFrameSentAt.get() > 0
-                ? System.currentTimeMillis() - instance.lastFrameSentAt.get()
-                : -1;
 
-        try {
-            ByteBuffer buffer = ByteBuffer.wrap(pcmData);
-            instance.translator.sendAudioFrame(buffer);
+        boolean sent = false;
+        Exception lastError = null;
+        int retries = 0;
+        final int maxRetries = 10;
 
-            long afterSendTimeNs = System.nanoTime();
-            long sendDurationNs = afterSendTimeNs - beforeSendTimeNs;
-            long totalElapsedNs = afterSendTimeNs - entryTimeNs;
+        // DashScope WebSocket 握手需要 ~330ms，首帧到达时 SDK 可能尚未就绪（报 "idle"），重试最多 500ms
+        while (!sent && retries < maxRetries && !instance.stopped.get()) {
+            try {
+                instance.translator.sendAudioFrame(ByteBuffer.wrap(pcmData));
+                sent = true;
+            } catch (Exception e) {
+                lastError = e;
+                String msg = e.getMessage();
+                boolean isIdle = msg != null && msg.contains("idle");
+                if (isIdle && !instance.stopped.get()) {
+                    retries++;
+                    try { Thread.sleep(50); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if (sent) {
+            long sendDurationNs = System.nanoTime() - beforeSendTimeNs;
             long intervalSinceLast = System.currentTimeMillis() - instance.lastFrameSentAt.getAndSet(System.currentTimeMillis());
 
             if (framesSoFar <= 10 || framesSoFar % 100 == 0) {
-                // 前10帧和每100帧打印详细信息
-                log.info("[SDK-SEND] frame#{} sessionId={} size={}bytes totalBytes={} " +
-                        "sendNs={} intervalSinceLast={}ms",
-                        framesSoFar, sessionId, pcmData.length, bytesSoFar,
-                        sendDurationNs, intervalSinceLast);
+                if (retries > 0) {
+                    log.info("[SDK-SEND] frame#{} sessionId={} size={}bytes totalBytes={} sendNs={} intervalSinceLast={}ms retries={}（等待SDK就绪）",
+                            framesSoFar, sessionId, pcmData.length, bytesSoFar, sendDurationNs, intervalSinceLast, retries);
+                } else {
+                    log.info("[SDK-SEND] frame#{} sessionId={} size={}bytes totalBytes={} sendNs={} intervalSinceLast={}ms",
+                            framesSoFar, sessionId, pcmData.length, bytesSoFar, sendDurationNs, intervalSinceLast);
+                }
             } else {
-                // 其余帧用 debug 级别
                 log.debug("[SDK-SEND] frame#{} sessionId={} size={}bytes sendNs={}",
                         framesSoFar, sessionId, pcmData.length, sendDurationNs);
             }
 
-            // 更新首帧时间戳
             if (instance.firstFrameSentAt.get() == 0) {
                 instance.firstFrameSentAt.set(System.currentTimeMillis());
                 log.info("[SDK-SEND] sessionId={} 首帧发送时间={}", sessionId, instance.firstFrameSentAt.get());
             }
-
-        } catch (Exception e) {
-            if (!instance.stopped.get()) {
-                log.error("[SDK-SEND-FAIL] sessionId={} frame#{} size={}bytes error={}",
-                        sessionId, framesSoFar, pcmData.length, e.getMessage(), e);
-            }
+        } else if (!instance.stopped.get()) {
+            log.error("[SDK-SEND-FAIL] sessionId={} frame#{} size={}bytes error={}",
+                    sessionId, framesSoFar, pcmData.length,
+                    lastError != null ? lastError.getMessage() : "unknown", lastError);
         }
     }
 

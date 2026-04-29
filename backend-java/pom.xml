@@ -111,12 +111,12 @@
     </plugins>
   </build>
 
-  <!-- 与开发启动脚本等价：mvn spring-boot:run -Plocal 会加载 application-local.yml -->
+  <!-- 启动.bat 通过 -Pdev 激活 application-dev.yml；生产打包不传此 profile -->
   <profiles>
     <profile>
-      <id>local</id>
+      <id>dev</id>
       <properties>
-        <spring-boot.run.profiles>local</spring-boot.run.profiles>
+        <spring-boot.run.profiles>dev</spring-boot.run.profiles>
       </properties>
     </profile>
   </profiles>

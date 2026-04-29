@@ -24,7 +24,7 @@ server:
 
 app:
   dashscope:
-    api-key: ${DASHSCOPE_API_KEY:sk-f2259f641b804b7981106869b41f1239}
+    api-key: ${DASHSCOPE_API_KEY:}
     # ASR：gummy-realtime-v1 支持中/英/印尼三语自动检测
     asr-model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
     asr-ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
@@ -48,7 +48,7 @@ app:
   asr:
     provider: ${ASR_PROVIDER:dashscope}
     dashscope:
-      api-key: ${DASHSCOPE_API_KEY:sk-f2259f641b804b7981106869b41f1239}
+      api-key: ${DASHSCOPE_API_KEY:}
       ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference/}
       model: ${DASHSCOPE_ASR_MODEL:gummy-realtime-v1}
       sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}

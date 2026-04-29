@@ -1,0 +1,9 @@
+# 生产环境配置（profile=prod）
+# 运行：java -jar si-backend.jar --spring.profiles.active=prod
+
+logging:
+  level:
+    root: WARN
+    com.simultaneousinterpretation: INFO
+    # 高频帧日志在生产环境降为 WARN，减少日志量
+    com.simultaneousinterpretation.asr.DashScopeSdkWrapper: WARN
