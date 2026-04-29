@@ -546,12 +546,16 @@ public class AsrWebSocketHandler extends AbstractWebSocketHandler {
     private SpeechSynthesisParam buildTtsParam(String lang) {
         String key = ttsProperties.getApiKey();
         if (key == null || key.isEmpty()) key = dashScopeProperties.getApiKey();
-        return SpeechSynthesisParam.builder()
+        SpeechSynthesisParam.Builder builder = SpeechSynthesisParam.builder()
                 .model(ttsProperties.getModel())
                 .voice(ttsProperties.getVoice(lang))
                 .format(SpeechSynthesisAudioFormat.PCM_24000HZ_MONO_16BIT)
-                .apiKey(key)
-                .build();
+                .apiKey(key);
+        // 印尼语以最快语速合成（阿里云官方推荐方式：通过 instruction 指令控制）
+        if ("id".equalsIgnoreCase(lang)) {
+            builder.parameters(new HashMap<>(Map.of("instruction", "请用尽可能快地语速说一句话。")));
+        }
+        return builder.build();
     }
 
     private TtsConnectionPool.Lang toPoolLang(String lang) {
